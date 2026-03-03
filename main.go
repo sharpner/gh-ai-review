@@ -4,7 +4,21 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
+
+	gocontext "context"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/sharpner/gh-ai-review/config"
+	rcontext "github.com/sharpner/gh-ai-review/context"
+	"github.com/sharpner/gh-ai-review/git"
+	gh "github.com/sharpner/gh-ai-review/github"
+	"github.com/sharpner/gh-ai-review/output"
+	"github.com/sharpner/gh-ai-review/review"
 )
 
 const version = "0.1.0"
@@ -22,7 +36,7 @@ func main() {
 	fs := flag.NewFlagSet("gh-ai-review", flag.ExitOnError)
 
 	var opts Options
-	fs.BoolVar(&opts.Full, "full", false, "Run full review loop (generic + focused)")
+	fs.BoolVar(&opts.Full, "full", false, "Run full review loop (generic + agents + focused)")
 	fs.StringVar(&opts.Agent, "agent", "", "Agent persona to impersonate")
 	fs.StringVar(&opts.Focus, "focus", "", "Custom focus area for review")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Print prompt, skip Gemini call")
@@ -37,7 +51,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  gh ai-review 620\n")
 		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --full\n")
-		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --agent security-pentest\n")
+		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --agent security-pentest-reviewer\n")
 		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --focus \"backward compatibility\"\n")
 		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --dry-run\n")
 	}
@@ -71,5 +85,221 @@ func main() {
 }
 
 func run(opts Options) error {
-	return fmt.Errorf("not implemented — run `gh ai-review %d` once review logic is built", opts.PRNumber)
+	// 1. Load config
+	root, err := git.Root()
+	if err != nil {
+		return fmt.Errorf("git root: %w", err)
+	}
+
+	cfg, err := config.Load(filepath.Join(root, config.DefaultConfigFile))
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// 2. Model override from flag
+	model := cfg.Model
+	if opts.Model != "" {
+		model = opts.Model
+	}
+
+	// 3. Fetch repo slug for PR URLs
+	repoSlug, _ := gh.RepoSlug()
+
+	// 4. Fetch PR data
+	fmt.Fprintf(os.Stderr, "Fetching PR #%d info...\n", opts.PRNumber)
+	pr, err := gh.FetchPR(opts.PRNumber)
+	if err != nil {
+		return fmt.Errorf("fetch PR: %w", err)
+	}
+
+	totalChanges := pr.Info.Additions + pr.Info.Deletions
+	fmt.Fprintf(os.Stderr, "Changed files: %d, Lines changed: %d\n", len(pr.ChangedFiles), totalChanges)
+
+	// 5. Dispatch
+	if opts.Agent != "" {
+		return runAgent(pr, cfg, model, repoSlug, opts)
+	}
+	if opts.Full {
+		return runFull(pr, cfg, model, repoSlug, opts)
+	}
+	return runDefault(pr, cfg, model, repoSlug, opts)
+}
+
+func runAgent(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+	root, err := git.Root()
+	if err != nil {
+		return err
+	}
+
+	agentFile := filepath.Join(root, cfg.AgentsDir, opts.Agent+".md")
+	agentPrompt, err := os.ReadFile(agentFile)
+	if err != nil {
+		// Agent not found — list available agents
+		fmt.Fprintf(os.Stderr, "Error: Subagent not found: %s\n\n", agentFile)
+		printAvailableAgents(filepath.Join(root, cfg.AgentsDir))
+		return fmt.Errorf("agent not found: %s", opts.Agent)
+	}
+
+	fmt.Fprintf(os.Stderr, "Building agent context for %s...\n", opts.Agent)
+	ctx, err := rcontext.BuildAgent(pr, cfg, opts.Agent, string(agentPrompt))
+	if err != nil {
+		return fmt.Errorf("build agent context: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Context: %d files, %d imports, %d siblings, %d tests\n",
+		len(ctx.FileContents), len(ctx.Imports), len(ctx.Siblings), len(ctx.Tests))
+
+	result, err := review.RunAgent(ctx, model, opts.DryRun)
+	if err != nil {
+		return err
+	}
+
+	if opts.DryRun {
+		output.PrintDryRun(result.Body)
+		return nil
+	}
+
+	comment := output.FormatAgentComment(result, opts.Agent, model, result.PromptTokens, len(pr.ChangedFiles), opts.PRNumber)
+	if err := gh.PostComment(opts.PRNumber, comment); err != nil {
+		return fmt.Errorf("post comment: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Review posted to PR #%d\n", opts.PRNumber)
+	if repoSlug != "" {
+		fmt.Fprintf(os.Stderr, "View: https://github.com/%s/pull/%d\n", repoSlug, opts.PRNumber)
+	}
+	if result.Verdict != "" {
+		fmt.Fprintf(os.Stderr, "\n%s\n", result.Verdict)
+	}
+	return nil
+}
+
+func runFull(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+	fmt.Fprintln(os.Stderr, "========================================================")
+	fmt.Fprintf(os.Stderr, "  Gemini Full Review Loop — PR #%d\n", opts.PRNumber)
+	fmt.Fprintf(os.Stderr, "  Model: %s\n", model)
+	fmt.Fprintln(os.Stderr, "========================================================")
+
+	fmt.Fprintln(os.Stderr, "\nBuilding review context...")
+	ctx, err := rcontext.Build(pr, cfg)
+	if err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	ctx.Focus = opts.Focus
+
+	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
+		len(ctx.FileContents), ctx.FilesSkipped, ctx.TokenEstimate)
+
+	if opts.DryRun {
+		result, dryErr := review.RunGeneric(ctx, model, true)
+		if dryErr != nil {
+			return dryErr
+		}
+		output.PrintDryRun(result.Body)
+		return nil
+	}
+
+	results, err := review.RunFull(pr, ctx, cfg, model, false, opts.PRNumber)
+	if err != nil {
+		return err
+	}
+
+	output.PrintFullSummary(results, opts.PRNumber, model, repoSlug)
+	return nil
+}
+
+func runDefault(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+	fmt.Fprintln(os.Stderr, "Building review context...")
+	ctx, err := rcontext.Build(pr, cfg)
+	if err != nil {
+		return fmt.Errorf("build context: %w", err)
+	}
+	ctx.Focus = opts.Focus
+
+	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
+		len(ctx.FileContents), ctx.FilesSkipped, ctx.TokenEstimate)
+
+	// Generic review
+	fmt.Fprintf(os.Stderr, "\nRunning reviews with %s...\n", model)
+	generic, err := review.RunGeneric(ctx, model, opts.DryRun)
+	if err != nil {
+		return fmt.Errorf("generic review: %w", err)
+	}
+
+	if opts.DryRun {
+		output.PrintDryRun(generic.Body)
+		return nil
+	}
+
+	results := []review.Result{generic}
+
+	// Focused reviews in PARALLEL (matching bash behavior)
+	focuses := review.DetermineFocuses(ctx.Categories)
+	if len(focuses) > 0 {
+		for _, focus := range focuses {
+			fmt.Fprintf(os.Stderr, "  [%s] started\n", focus)
+		}
+
+		g, _ := errgroup.WithContext(gocontext.Background())
+		focusResults := make([]review.Result, len(focuses))
+
+		for i, focus := range focuses {
+			g.Go(func() error {
+				result, runErr := review.RunFocused(ctx, focus, model, false)
+				if runErr != nil {
+					fmt.Fprintf(os.Stderr, "  [%s] failed: %v\n", focus, runErr)
+					return nil // don't fail the whole group
+				}
+				focusResults[i] = result
+				fmt.Fprintf(os.Stderr, "  [%s] done\n", focus)
+				return nil
+			})
+		}
+		g.Wait()
+
+		for _, r := range focusResults {
+			if r.Label != "" {
+				results = append(results, r)
+			}
+		}
+	}
+
+	// Post combined comment
+	comment := output.FormatCombinedComment(results, model, generic.PromptTokens, opts.PRNumber)
+	if err := gh.PostComment(opts.PRNumber, comment); err != nil {
+		return fmt.Errorf("post comment: %w", err)
+	}
+
+	output.PrintSummary(results, opts.PRNumber, model, generic.PromptTokens, repoSlug)
+	return nil
+}
+
+// printAvailableAgents lists all .md files in the agents directory.
+func printAvailableAgents(agentsDir string) {
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return
+	}
+
+	var agents []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		agents = append(agents, strings.TrimSuffix(e.Name(), ".md"))
+	}
+
+	if len(agents) == 0 {
+		fmt.Fprintln(os.Stderr, "No agent files found.")
+		return
+	}
+
+	sort.Strings(agents)
+	fmt.Fprintln(os.Stderr, "Available agents:")
+	for _, a := range agents {
+		fmt.Fprintf(os.Stderr, "  - %s\n", a)
+	}
 }

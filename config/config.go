@@ -7,9 +7,9 @@ import (
 )
 
 const (
-	DefaultModel          = "gemini-2.5-flash"
-	DefaultMaxContextChars = 900_000
-	DefaultConfigFile     = ".ai-review.yaml"
+	DefaultModel           = "gemini-2.5-flash"
+	DefaultMaxContextChars = 2_000_000
+	DefaultConfigFile      = ".ai-review.yaml"
 )
 
 type Config struct {
@@ -42,8 +42,8 @@ func defaults() Config {
 	return Config{
 		Model:           DefaultModel,
 		MaxContextChars: DefaultMaxContextChars,
-		AgentsDir:       ".ai-review/agents",
-		ContextDocs:     []string{"CLAUDE.md"},
-		FocusedReviews:  []string{"security", "usability"},
+		AgentsDir:       ".claude/agents",
+		ContextDocs:     []string{"CLAUDE.md", "docs/code-standards.md", "docs/design-system.md"},
+		FocusedReviews:  []string{"security", "usability", "mobile"},
 	}
 }
