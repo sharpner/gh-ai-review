@@ -149,7 +149,13 @@ func BuildAgent(pr gh.PRData, cfg config.Config, agentName, agentPrompt string) 
 
 // IsPathInRepo checks that a path resolves within the repository root.
 // Prevents path traversal attacks via malicious import paths.
+// Uses filepath.Rel to avoid sibling-directory false positives
+// (e.g. /repo-secrets matching prefix /repo).
 func IsPathInRepo(root, path string) bool {
 	abs := filepath.Join(root, filepath.Clean(path))
-	return strings.HasPrefix(abs, root)
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(rel, "..")
 }

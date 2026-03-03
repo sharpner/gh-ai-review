@@ -14,6 +14,8 @@ func TestIsPathInRepo(t *testing.T) {
 		{"../../../etc/passwd", false},
 		{"src/../../outside", false},
 		{"normal/file.ts", true},
+		// Sibling directory attack: /home/user/project-secrets should NOT match /home/user/project
+		{"../" + "project-secrets/secret.md", false},
 	}
 	for _, tt := range tests {
 		got := IsPathInRepo(root, tt.path)
