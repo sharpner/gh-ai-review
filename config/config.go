@@ -1,0 +1,49 @@
+package config
+
+import (
+	"os"
+
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	DefaultModel          = "gemini-2.5-flash"
+	DefaultMaxContextChars = 900_000
+	DefaultConfigFile     = ".ai-review.yaml"
+)
+
+type Config struct {
+	Model           string   `yaml:"model"`
+	MaxContextChars int      `yaml:"max_context_chars"`
+	AgentsDir       string   `yaml:"agents_dir"`
+	ContextDocs     []string `yaml:"context_docs"`
+	FocusedReviews  []string `yaml:"focused_reviews"`
+}
+
+func Load(path string) (Config, error) {
+	cfg := defaults()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, err
+	}
+
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return cfg, err
+	}
+
+	return cfg, nil
+}
+
+func defaults() Config {
+	return Config{
+		Model:           DefaultModel,
+		MaxContextChars: DefaultMaxContextChars,
+		AgentsDir:       ".ai-review/agents",
+		ContextDocs:     []string{"CLAUDE.md"},
+		FocusedReviews:  []string{"security", "usability"},
+	}
+}
