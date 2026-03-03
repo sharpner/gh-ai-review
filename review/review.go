@@ -2,33 +2,365 @@ package review
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 
-	"github.com/sharpner/gh-ai-review/context"
+	gocontext "context"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/sharpner/gh-ai-review/config"
+	rcontext "github.com/sharpner/gh-ai-review/context"
+	"github.com/sharpner/gh-ai-review/git"
+	gh "github.com/sharpner/gh-ai-review/github"
 )
 
 // Result holds a single review result.
 type Result struct {
-	Label   string // e.g. "Generic Review", "Security", "Agent: security-pentest"
-	Body    string // Markdown content for PR comment
-	Verdict string // "approve", "request-changes", "comment"
+	Label        string // e.g. "Generic Review", "Security", "Agent: security-pentest"
+	Body         string // Markdown content for PR comment
+	Verdict      string // extracted verdict string
+	PromptTokens int    // len(prompt)/CharsPerToken — actual token count sent to Gemini
 }
 
+var verdictRe = regexp.MustCompile(`\*\*Verdict:\*\*\s*(PASS|NEEDS WORK|FAIL)`)
+var riskLevelRe = regexp.MustCompile(`\*\*Risk Level:\*\*\s*(LOW|MEDIUM|HIGH|CRITICAL)`)
+var a11yScoreRe = regexp.MustCompile(`\*\*Accessibility Score:\*\*\s*(GOOD|NEEDS WORK|POOR)`)
+var mobileReadyRe = regexp.MustCompile(`\*\*Mobile Ready:\*\*\s*(YES|NEEDS WORK|NO)`)
+var reviewerRe = regexp.MustCompile("`([a-z][-a-z:]+)`")
+
 // RunGeneric performs a generic code review.
-func RunGeneric(ctx context.ReviewContext, model string, dryRun bool) (Result, error) {
-	return Result{}, fmt.Errorf("not implemented")
+func RunGeneric(ctx gocontext.Context, reviewCtx rcontext.ReviewContext, model string, dryRun bool) (Result, error) {
+	prompt, err := BuildGenericPrompt(reviewCtx)
+	if err != nil {
+		return Result{}, err
+	}
+
+	tokens := len(prompt) / rcontext.CharsPerToken
+
+	if dryRun {
+		return Result{Label: "Generic Review", Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
+	}
+
+	body, err := callGemini(ctx, model, prompt)
+	if err != nil {
+		return Result{}, fmt.Errorf("generic review: %w", err)
+	}
+
+	verdict := extractMatch(verdictRe, body)
+	return Result{Label: "Generic Review", Body: body, Verdict: verdict, PromptTokens: tokens}, nil
 }
 
 // RunFocused performs a focused review on a specific area.
-func RunFocused(ctx context.ReviewContext, focus string, model string, dryRun bool) (Result, error) {
-	return Result{}, fmt.Errorf("not implemented")
+func RunFocused(ctx gocontext.Context, reviewCtx rcontext.ReviewContext, focus string, model string, dryRun bool) (Result, error) {
+	prompt, err := BuildFocusedPrompt(reviewCtx, focus)
+	if err != nil {
+		return Result{}, err
+	}
+
+	label := focusLabel(focus)
+	tokens := len(prompt) / rcontext.CharsPerToken
+
+	if dryRun {
+		return Result{Label: label, Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
+	}
+
+	body, err := callGemini(ctx, model, prompt)
+	if err != nil {
+		return Result{}, fmt.Errorf("%s review: %w", focus, err)
+	}
+
+	var verdict string
+	switch focus {
+	case "security":
+		verdict = extractMatch(riskLevelRe, body)
+	case "usability":
+		verdict = extractMatch(a11yScoreRe, body)
+	case "mobile":
+		verdict = extractMatch(mobileReadyRe, body)
+	default:
+		verdict = extractMatch(verdictRe, body)
+	}
+
+	return Result{Label: label, Body: body, Verdict: verdict, PromptTokens: tokens}, nil
 }
 
 // RunAgent performs a review using an agent persona.
-func RunAgent(ctx context.AgentContext, model string, dryRun bool) (Result, error) {
-	return Result{}, fmt.Errorf("not implemented")
+func RunAgent(ctx gocontext.Context, agentCtx rcontext.AgentContext, model string, dryRun bool) (Result, error) {
+	prompt, err := BuildAgentPrompt(agentCtx)
+	if err != nil {
+		return Result{}, err
+	}
+
+	label := "Agent: " + agentCtx.AgentName
+	tokens := len(prompt) / rcontext.CharsPerToken
+
+	if dryRun {
+		return Result{Label: label, Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
+	}
+
+	body, err := callGemini(ctx, model, prompt)
+	if err != nil {
+		return Result{}, fmt.Errorf("agent %s review: %w", agentCtx.AgentName, err)
+	}
+
+	body = stripAgentPreamble(body)
+	verdict := extractMatch(verdictRe, body)
+	return Result{Label: label, Body: body, Verdict: verdict, PromptTokens: tokens}, nil
 }
 
-// RunFull performs the full review loop: generic + all focused reviews.
-func RunFull(ctx context.ReviewContext, focuses []string, model string, dryRun bool) ([]Result, error) {
-	return nil, fmt.Errorf("not implemented")
+// RunFull performs the full review loop: generic → agents → focused.
+func RunFull(ctx gocontext.Context, pr gh.PRData, reviewCtx rcontext.ReviewContext, cfg config.Config, model string, dryRun bool, prNumber int) ([]Result, error) {
+	var allResults []Result
+
+	// Phase 1: Generic review
+	fmt.Fprintln(os.Stderr, "PHASE 1/3: Generic Code Review")
+	fmt.Fprintln(os.Stderr, "────────────────────────────────────────────────────────")
+	generic, err := RunGeneric(ctx, reviewCtx, model, dryRun)
+	if err != nil {
+		return nil, fmt.Errorf("phase 1 (generic): %w", err)
+	}
+	allResults = append(allResults, generic)
+
+	if !dryRun {
+		comment := generic.Body + fmt.Sprintf("\n\n---\n*Generated by Gemini (%s) | Generic Review | ~%d tokens context*\n*Run: `gh ai-review %d`*",
+			model, generic.PromptTokens, prNumber)
+		if postErr := gh.PostComment(prNumber, comment); postErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to post generic review: %v\n", postErr)
+		}
+	}
+
+	// Phase 2: Agent impersonation reviews
+	fmt.Fprintln(os.Stderr, "\nPHASE 2/3: Subagent Impersonation Reviews")
+	fmt.Fprintln(os.Stderr, "────────────────────────────────────────────────────────")
+	recommended := ExtractRecommendedAgents(generic.Body)
+
+	root, err := git.Root()
+	if err != nil {
+		return nil, fmt.Errorf("git root: %w", err)
+	}
+
+	var agentsToRun []string
+	var agentsSkipped []string
+	for _, agent := range recommended {
+		agentFile := filepath.Join(root, cfg.AgentsDir, agent+".md")
+		if _, statErr := os.Stat(agentFile); statErr == nil {
+			agentsToRun = append(agentsToRun, agent)
+		} else {
+			agentsSkipped = append(agentsSkipped, agent)
+		}
+	}
+
+	if len(agentsSkipped) > 0 {
+		fmt.Fprintf(os.Stderr, "  Skipped (no agent file): %s\n", strings.Join(agentsSkipped, ", "))
+	}
+
+	if len(agentsToRun) > 0 {
+		fmt.Fprintf(os.Stderr, "  Running impersonations for: %s\n", strings.Join(agentsToRun, ", "))
+
+		g, gctx := errgroup.WithContext(ctx)
+		agentResults := make([]Result, len(agentsToRun))
+
+		for i, agent := range agentsToRun {
+			g.Go(func() error {
+				agentFile := filepath.Join(root, cfg.AgentsDir, agent+".md")
+				prompt, readErr := os.ReadFile(agentFile)
+				if readErr != nil {
+					return fmt.Errorf("read agent %s: %w", agent, readErr)
+				}
+
+				agentCtx, buildErr := rcontext.BuildAgent(pr, cfg, agent, string(prompt))
+				if buildErr != nil {
+					return fmt.Errorf("build agent context %s: %w", agent, buildErr)
+				}
+
+				result, runErr := RunAgent(gctx, agentCtx, model, dryRun)
+				if runErr != nil {
+					return fmt.Errorf("run agent %s: %w", agent, runErr)
+				}
+				agentResults[i] = result
+
+				if !dryRun {
+					comment := result.Body + fmt.Sprintf("\n\n---\n*Generated by Gemini (%s) impersonating `%s`*\n*PR #%d | %d files | ~%d tokens context*\n*Run: `gh ai-review %d --agent %s`*",
+						model, agent, prNumber, len(pr.ChangedFiles), result.PromptTokens, prNumber, agent)
+					if postErr := gh.PostComment(prNumber, comment); postErr != nil {
+						fmt.Fprintf(os.Stderr, "  warning: failed to post %s review: %v\n", agent, postErr)
+					}
+				}
+
+				fmt.Fprintf(os.Stderr, "  Done: %s\n", agent)
+				return nil
+			})
+		}
+
+		if gErr := g.Wait(); gErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: some agent reviews failed: %v\n", gErr)
+		}
+
+		// Show per-agent verdicts
+		fmt.Fprintln(os.Stderr)
+		for idx, r := range agentResults {
+			if r.Label == "" {
+				continue
+			}
+			allResults = append(allResults, r)
+			if r.Verdict != "" {
+				fmt.Fprintf(os.Stderr, "  %s: %s\n", agentsToRun[idx], r.Verdict)
+			}
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  No subagent impersonations to run (no matching agent files found)")
+	}
+
+	// Phase 3: Focused reviews
+	fmt.Fprintln(os.Stderr, "\nPHASE 3/3: Focused Reviews (parallel)")
+	fmt.Fprintln(os.Stderr, "────────────────────────────────────────────────────────")
+	focuses := DetermineFocuses(reviewCtx.Categories)
+
+	if len(focuses) > 0 {
+		g, gctx := errgroup.WithContext(ctx)
+		focusResults := make([]Result, len(focuses))
+
+		for i, focus := range focuses {
+			fmt.Fprintf(os.Stderr, "  Starting: %s review\n", focus)
+			g.Go(func() error {
+				result, runErr := RunFocused(gctx, reviewCtx, focus, model, dryRun)
+				if runErr != nil {
+					return runErr
+				}
+				focusResults[i] = result
+				fmt.Fprintf(os.Stderr, "  Done: %s\n", focus)
+				return nil
+			})
+		}
+
+		if gErr := g.Wait(); gErr != nil {
+			fmt.Fprintf(os.Stderr, "  warning: some focused reviews failed: %v\n", gErr)
+		}
+
+		// Combine focused into single comment with footer
+		var focusBodies []string
+		var focusTokens int
+		for _, r := range focusResults {
+			if r.Body != "" {
+				focusBodies = append(focusBodies, r.Body)
+				allResults = append(allResults, r)
+				if r.PromptTokens > focusTokens {
+					focusTokens = r.PromptTokens
+				}
+			}
+		}
+
+		if len(focusBodies) > 0 && !dryRun {
+			combined := strings.Join(focusBodies, "\n\n---\n\n")
+			combined += fmt.Sprintf("\n\n---\n*Focused reviews by Gemini (%s) | ~%d tokens context*", model, focusTokens)
+			if postErr := gh.PostComment(prNumber, combined); postErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: failed to post focused reviews: %v\n", postErr)
+			}
+			fmt.Fprintln(os.Stderr, "  Focused reviews posted to PR")
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  No focused reviews needed (no UI/API/auth files detected)")
+	}
+
+	return allResults, nil
+}
+
+// ExtractRecommendedAgents parses agent names from the Recommended Reviewers section.
+func ExtractRecommendedAgents(body string) []string {
+	lines := strings.Split(body, "\n")
+	inSection := false
+	var agents []string
+	seen := make(map[string]bool)
+
+	for _, line := range lines {
+		if strings.Contains(line, "### Recommended Reviewers") {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(line, "### ") {
+			break
+		}
+		if !inSection {
+			continue
+		}
+
+		matches := reviewerRe.FindAllStringSubmatch(line, -1)
+		for _, m := range matches {
+			agent := m[1]
+			if seen[agent] {
+				continue
+			}
+			seen[agent] = true
+			agents = append(agents, agent)
+		}
+	}
+
+	return agents
+}
+
+// DetermineFocuses returns which focused reviews should run based on file categories.
+func DetermineFocuses(cats rcontext.FileCategories) []string {
+	var focuses []string
+	if cats.API || cats.Auth {
+		focuses = append(focuses, "security")
+	}
+	if cats.UI || cats.NewRoutes || cats.Navigation {
+		focuses = append(focuses, "usability")
+	}
+	if cats.UI || cats.Mobile || cats.Design {
+		focuses = append(focuses, "mobile")
+	}
+	return focuses
+}
+
+// stripAgentPreamble removes the agent header prompt if Gemini echoes it back.
+func stripAgentPreamble(body string) string {
+	// The agentHeader starts with "You are impersonating"
+	if !strings.HasPrefix(body, "You are impersonating") {
+		return body
+	}
+
+	// Find the actual review content after the preamble separator
+	markers := []string{
+		"\n# Security Review",
+		"\n# Review",
+		"\n**Verdict:",
+		"\n**Risk Level:",
+		"\n**Accessibility Score:",
+		"\n**Mobile Ready:",
+		"\n## ",
+		"\n---\n",
+	}
+	for _, marker := range markers {
+		idx := strings.Index(body, marker)
+		if idx < 0 {
+			continue
+		}
+		return strings.TrimSpace(body[idx:])
+	}
+
+	return body
+}
+
+func extractMatch(re *regexp.Regexp, body string) string {
+	m := re.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
+func focusLabel(focus string) string {
+	switch focus {
+	case "security":
+		return "Security Review"
+	case "usability":
+		return "Usability Review"
+	case "mobile":
+		return "Mobile Review"
+	}
+	return focus + " Review"
 }
