@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultModel           = "gemini-2.5-flash"
+	DefaultModel           = "gemini-3-flash-preview"
 	DefaultMaxContextChars = 2_000_000
 	DefaultConfigFile      = ".ai-review.yaml"
 )
