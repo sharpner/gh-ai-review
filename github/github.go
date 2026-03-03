@@ -91,8 +91,8 @@ func PostComment(prNumber int, body string) error {
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	defer func() { _ = tmp.Close() }()
 
 	if _, err := tmp.WriteString(body); err != nil {
 		return fmt.Errorf("write comment body: %w", err)

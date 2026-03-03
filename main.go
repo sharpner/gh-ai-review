@@ -268,7 +268,7 @@ func runDefault(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, r
 				return nil
 			})
 		}
-		g.Wait()
+		_ = g.Wait()
 
 		for _, r := range focusResults {
 			if r.Label != "" {
