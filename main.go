@@ -123,17 +123,20 @@ func run(ctx gocontext.Context, opts Options) error {
 	totalChanges := pr.Info.Additions + pr.Info.Deletions
 	fmt.Fprintf(os.Stderr, "Changed files: %d, Lines changed: %d\n", len(pr.ChangedFiles), totalChanges)
 
-	// 5. Dispatch
+	// 5. Discover available agents
+	agents := discoverAgents(filepath.Join(root, cfg.AgentsDir))
+
+	// 6. Dispatch
 	if opts.Agent != "" {
-		return runAgent(ctx, pr, cfg, model, repoSlug, opts)
+		return runAgent(ctx, pr, cfg, model, repoSlug, agents, opts)
 	}
 	if opts.Full {
-		return runFull(ctx, pr, cfg, model, repoSlug, opts)
+		return runFull(ctx, pr, cfg, model, repoSlug, agents, opts)
 	}
-	return runDefault(ctx, pr, cfg, model, repoSlug, opts)
+	return runDefault(ctx, pr, cfg, model, repoSlug, agents, opts)
 }
 
-func runAgent(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runAgent(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, agents []string, opts Options) error {
 	root, err := git.Root()
 	if err != nil {
 		return err
@@ -144,7 +147,7 @@ func runAgent(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, rep
 	if err != nil {
 		// Agent not found — list available agents
 		fmt.Fprintf(os.Stderr, "Error: Subagent not found: %s\n\n", agentFile)
-		printAvailableAgents(filepath.Join(root, cfg.AgentsDir))
+		printAvailableAgents(agents)
 		return fmt.Errorf("agent not found: %s", opts.Agent)
 	}
 
@@ -182,7 +185,7 @@ func runAgent(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, rep
 	return nil
 }
 
-func runFull(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runFull(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, agents []string, opts Options) error {
 	fmt.Fprintln(os.Stderr, "========================================================")
 	fmt.Fprintf(os.Stderr, "  Gemini Full Review Loop — PR #%d\n", opts.PRNumber)
 	fmt.Fprintf(os.Stderr, "  Model: %s\n", model)
@@ -194,6 +197,7 @@ func runFull(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repo
 		return fmt.Errorf("build context: %w", err)
 	}
 	reviewCtx.Focus = opts.Focus
+	reviewCtx.AvailableAgents = agents
 
 	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
 		len(reviewCtx.FileContents), reviewCtx.FilesSkipped, reviewCtx.TokenEstimate)
@@ -216,13 +220,14 @@ func runFull(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repo
 	return nil
 }
 
-func runDefault(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runDefault(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, agents []string, opts Options) error {
 	fmt.Fprintln(os.Stderr, "Building review context...")
 	reviewCtx, err := rcontext.Build(pr, cfg)
 	if err != nil {
 		return fmt.Errorf("build context: %w", err)
 	}
 	reviewCtx.Focus = opts.Focus
+	reviewCtx.AvailableAgents = agents
 
 	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
 		len(reviewCtx.FileContents), reviewCtx.FilesSkipped, reviewCtx.TokenEstimate)
@@ -282,11 +287,11 @@ func runDefault(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, r
 	return nil
 }
 
-// printAvailableAgents lists all .md files in the agents directory.
-func printAvailableAgents(agentsDir string) {
+// discoverAgents returns sorted agent names from .md files in the agents directory.
+func discoverAgents(agentsDir string) []string {
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
-		return
+		return nil
 	}
 
 	var agents []string
@@ -300,12 +305,16 @@ func printAvailableAgents(agentsDir string) {
 		agents = append(agents, strings.TrimSuffix(e.Name(), ".md"))
 	}
 
+	sort.Strings(agents)
+	return agents
+}
+
+// printAvailableAgents lists discovered agents to stderr.
+func printAvailableAgents(agents []string) {
 	if len(agents) == 0 {
 		fmt.Fprintln(os.Stderr, "No agent files found.")
 		return
 	}
-
-	sort.Strings(agents)
 	fmt.Fprintln(os.Stderr, "Available agents:")
 	for _, a := range agents {
 		fmt.Fprintf(os.Stderr, "  - %s\n", a)

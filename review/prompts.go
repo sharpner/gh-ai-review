@@ -8,7 +8,7 @@ import (
 	"github.com/sharpner/gh-ai-review/context"
 )
 
-const genericInstructions = `
+const genericInstructionsHeader = `
 # Review Instructions
 
 You are a senior code reviewer. Review the diff IN CONTEXT of the full file contents.
@@ -20,18 +20,9 @@ You are a senior code reviewer. Review the diff IN CONTEXT of the full file cont
 4. Architecture concerns (does it fit existing patterns?)
 5. Performance issues
 6. Consistency with project standards (CLAUDE.md, code-standards.md)
+`
 
-**Recommend specialized reviewers:**
-Available Claude Code subagents:
-- ` + "`security-pentest-reviewer`" + `: API routes, auth, OWASP Top 10
-- ` + "`mobile-responsive-reviewer`" + `: UI components, touch targets (44px min), responsive layouts
-- ` + "`mythical-design-reviewer`" + `: Design system compliance, colors, typography
-- ` + "`brand-voice-writer`" + `: User-facing copy, microcopy
-- ` + "`ux-designer`" + `: User flows, interaction patterns, accessibility
-- ` + "`user-journey-reviewer`" + `: Complete user journeys, click paths, empty states, CRUDs
-- ` + "`pr-review-toolkit:code-reviewer`" + `: Comprehensive code review (REQUIRE for complex PRs)
-- ` + "`loose-ends-hunter`" + `: Dead code, orphaned imports after refactoring
-
+const genericInstructionsFooter = `
 **Format EXACTLY as:**
 
 ## General Review
@@ -112,7 +103,7 @@ responsive images, modal behavior on mobile, form inputs, flex/grid stacking.
 Only real mobile issues. No desktop-only concerns.
 `
 
-const agentHeader = `You are impersonating a Claude Code subagent for ChronicleForge code review.
+const agentHeader = `You are impersonating a code review subagent.
 CRITICAL: You MUST follow the exact identity, methodology, and output format from the agent prompt below.
 
 # Your Identity (Subagent Prompt)
@@ -143,6 +134,25 @@ Use ALL of it. Don't just look at the diff — understand the FULL picture.
 Begin your review now.
 `
 
+// buildGenericInstructions creates the generic review instructions with available agents.
+func buildGenericInstructions(agents []string) string {
+	var b strings.Builder
+	b.WriteString(genericInstructionsHeader)
+
+	if len(agents) > 0 {
+		b.WriteString("\n**Recommend specialized reviewers from this list:**\nAvailable subagent personas (installed in this repo):\n")
+		for _, agent := range agents {
+			fmt.Fprintf(&b, "- `%s`\n", agent)
+		}
+		b.WriteString("\nOnly recommend agents from the list above.\n")
+	} else {
+		b.WriteString("\n**No subagent personas are installed in this repo.**\nSkip the Recommended Reviewers section.\n")
+	}
+
+	b.WriteString(genericInstructionsFooter)
+	return b.String()
+}
+
 // BuildGenericPrompt creates the prompt for a generic code review.
 func BuildGenericPrompt(ctx context.ReviewContext) (string, error) {
 	var b strings.Builder
@@ -153,7 +163,7 @@ func BuildGenericPrompt(ctx context.ReviewContext) (string, error) {
 		fmt.Fprintf(&b, "\n**SPECIAL FOCUS (prioritize this!):**\n%s\n", ctx.Focus)
 	}
 
-	b.WriteString(genericInstructions)
+	b.WriteString(buildGenericInstructions(ctx.AvailableAgents))
 
 	return b.String(), nil
 }
@@ -248,7 +258,7 @@ func BuildAgentPrompt(ctx context.AgentContext) (string, error) {
 func writeContextBlock(b *strings.Builder, ctx context.ReviewContext) {
 	pr := ctx.PR.Info
 
-	b.WriteString("You are reviewing a PR for ChronicleForge, a Next.js 14 + Go backend D&D campaign management tool.\n\n")
+	b.WriteString("You are reviewing a pull request.\n\n")
 
 	fmt.Fprintf(b, "# PR Information\n**Title:** %s\n**Base:** %s\n**Files changed:** %d\n**Lines changed:** +%d / -%d\n",
 		pr.Title, pr.BaseRef, len(ctx.PR.ChangedFiles), pr.Additions, pr.Deletions)
@@ -261,10 +271,12 @@ func writeContextBlock(b *strings.Builder, ctx context.ReviewContext) {
 	fmt.Fprintf(b, "\n- CRUD Operations: %v\n- Complex PR: %v\n", ctx.CRUDInDiff, ctx.Complex)
 
 	// Project docs
-	b.WriteString("\n# Project Context\n")
-	for _, name := range ctx.DocOrder {
-		content := ctx.ProjectDocs[name]
-		fmt.Fprintf(b, "\n## %s\n%s\n", name, content)
+	if len(ctx.DocOrder) > 0 {
+		b.WriteString("\n# Project Context\n")
+		for _, name := range ctx.DocOrder {
+			content := ctx.ProjectDocs[name]
+			fmt.Fprintf(b, "\n## %s\n%s\n", name, content)
+		}
 	}
 
 	// Full file contents

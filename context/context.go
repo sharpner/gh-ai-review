@@ -13,16 +13,17 @@ import (
 
 // ReviewContext holds all data needed for a review prompt.
 type ReviewContext struct {
-	PR            gh.PRData
-	ProjectDocs   map[string]string // filename -> content (ordered via DocOrder)
-	DocOrder      []string          // ordered doc names for deterministic output
-	FileContents  map[string]string // path -> content (for changed files)
-	Categories    FileCategories
-	Focus         string
-	FilesSkipped  int
-	TokenEstimate int
-	CRUDInDiff    bool
-	Complex       bool
+	PR              gh.PRData
+	ProjectDocs     map[string]string // filename -> content (ordered via DocOrder)
+	DocOrder        []string          // ordered doc names for deterministic output
+	FileContents    map[string]string // path -> content (for changed files)
+	Categories      FileCategories
+	Focus           string
+	FilesSkipped    int
+	TokenEstimate   int
+	CRUDInDiff      bool
+	Complex         bool
+	AvailableAgents []string // agent names discovered from agents_dir
 }
 
 // AgentContext extends ReviewContext with agent-specific data.
