@@ -1,8 +1,12 @@
 package review
 
-import "github.com/sharpner/gh-ai-review/context"
+import (
+	"fmt"
+
+	"github.com/sharpner/gh-ai-review/context"
+)
 
 // BuildAgentPrompt creates a prompt for an agent-impersonated review.
-func BuildAgentPrompt(ctx context.AgentContext) string {
-	return "" // TODO: implement
+func BuildAgentPrompt(ctx context.AgentContext) (string, error) {
+	return "", fmt.Errorf("BuildAgentPrompt: not implemented")
 }

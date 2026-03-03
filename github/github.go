@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cli/go-gh/v2"
 )
@@ -38,5 +39,5 @@ func RepoSlug() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(stdout.Bytes()), nil
+	return strings.TrimSpace(stdout.String()), nil
 }

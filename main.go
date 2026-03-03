@@ -9,14 +9,24 @@ import (
 
 const version = "0.1.0"
 
+type Options struct {
+	PRNumber int
+	Full     bool
+	Agent    string
+	Focus    string
+	DryRun   bool
+	Model    string
+}
+
 func main() {
 	fs := flag.NewFlagSet("gh-ai-review", flag.ExitOnError)
 
-	full := fs.Bool("full", false, "Run full review loop (generic + focused)")
-	agent := fs.String("agent", "", "Agent persona to impersonate")
-	focus := fs.String("focus", "", "Custom focus area for review")
-	dryRun := fs.Bool("dry-run", false, "Print prompt, skip Gemini call")
-	model := fs.String("model", "", "Gemini model to use (overrides config)")
+	var opts Options
+	fs.BoolVar(&opts.Full, "full", false, "Run full review loop (generic + focused)")
+	fs.StringVar(&opts.Agent, "agent", "", "Agent persona to impersonate")
+	fs.StringVar(&opts.Focus, "focus", "", "Custom focus area for review")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "Print prompt, skip Gemini call")
+	fs.StringVar(&opts.Model, "model", "", "Gemini model to use (overrides config)")
 	showVersion := fs.Bool("version", false, "Print version")
 
 	fs.Usage = func() {
@@ -52,19 +62,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: invalid PR number: %s\n", args[0])
 		os.Exit(1)
 	}
+	opts.PRNumber = prNumber
 
-	if err := run(prNumber, *full, *agent, *focus, *dryRun, *model); err != nil {
+	if err := run(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(prNumber int, full bool, agent, focus string, dryRun bool, model string) error {
-	_ = prNumber
-	_ = full
-	_ = agent
-	_ = focus
-	_ = dryRun
-	_ = model
-	return fmt.Errorf("not implemented — run `gh ai-review %d` once review logic is built", prNumber)
+func run(opts Options) error {
+	return fmt.Errorf("not implemented — run `gh ai-review %d` once review logic is built", opts.PRNumber)
 }

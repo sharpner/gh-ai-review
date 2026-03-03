@@ -28,9 +28,3 @@ func PrintDryRun(prompt string) {
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, prompt)
 }
-
-// Errorf prints an error message to stderr and exits.
-func Errorf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "error: "+format+"\n", args...)
-	os.Exit(1)
-}

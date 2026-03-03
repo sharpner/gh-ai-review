@@ -21,26 +21,34 @@ func Categorize(files []string) FileCategories {
 	var cats FileCategories
 	for _, f := range files {
 		lower := strings.ToLower(f)
-		switch {
-		case hasAny(lower, ".tsx", ".jsx", "component"):
+		if hasAny(lower, ".tsx", ".jsx", "component") {
 			cats.UI = true
-		case hasAny(lower, "route.ts", "api/", "handler"):
+		}
+		if hasAny(lower, "route.ts", "api/", "handler") {
 			cats.API = true
-		case hasAny(lower, "auth", "login", "session"):
+		}
+		if hasAny(lower, "auth", "login", "session") {
 			cats.Auth = true
-		case hasAny(lower, "mobile", "responsive"):
+		}
+		if hasAny(lower, "mobile", "responsive") {
 			cats.Mobile = true
-		case hasAny(lower, "design", "theme", "style"):
+		}
+		if hasAny(lower, "design", "theme", "style") {
 			cats.Design = true
-		case hasAny(lower, "route", "middleware"):
+		}
+		if hasAny(lower, "route", "middleware") {
 			cats.Routes = true
-		case hasAny(lower, ".yaml", ".yml", ".json", ".toml", ".env"):
+		}
+		if hasAny(lower, ".yaml", ".yml", ".json", ".toml", ".env") {
 			cats.Config = true
-		case hasAny(lower, "_test.go", ".test.", ".spec."):
+		}
+		if hasAny(lower, "_test.go", ".test.", ".spec.") {
 			cats.Tests = true
-		case hasAny(lower, ".md", "doc"):
+		}
+		if hasAny(lower, ".md", "doc") {
 			cats.Docs = true
-		case hasAny(lower, "migration", "schema", "prisma"):
+		}
+		if hasAny(lower, "migration", "schema", "prisma") {
 			cats.DB = true
 		}
 	}
