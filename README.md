@@ -1,40 +1,49 @@
 # gh-ai-review
 
-A `gh` CLI extension for AI-powered pull request reviews using Google Gemini.
+AI-powered pull request reviews using Google Gemini, as a `gh` CLI extension.
 
-Replaces fragile bash scripts with a single Go binary — proper parallelism, direct Gemini SDK, budget-aware context building, and agent impersonation.
+One command reviews your PR — generic code review, security/usability/mobile focused reviews, and agent impersonation with deep context. All posted as PR comments.
 
-## Install
+## Quick Start
 
 ```bash
+# 1. Install
 gh extension install sharpner/gh-ai-review
+
+# 2. Set your Gemini API key
+export GOOGLE_API_KEY="your-key-here"
+
+# 3. Review a PR
+gh ai-review 42
 ```
+
+That's it. The tool reads your repo, builds context, calls Gemini, and posts a review comment.
 
 ## Prerequisites
 
-- [`gh`](https://cli.github.com/) CLI installed and authenticated
-- `GOOGLE_API_KEY` environment variable set (Gemini API key)
+- [`gh`](https://cli.github.com/) CLI installed and authenticated (`gh auth login`)
+- `GOOGLE_API_KEY` environment variable ([get one here](https://aistudio.google.com/apikey))
 
 ## Usage
 
 ```bash
-# Generic review (+ auto-detected focused reviews)
-gh ai-review 620
+# Simple review (generic + auto-detected focused reviews)
+gh ai-review 42
 
-# Full review loop (generic → agent impersonation → focused)
-gh ai-review 620 --full
+# Full 3-phase loop (generic → agent impersonation → focused)
+gh ai-review 42 --full
 
-# Agent impersonation (uses a persona prompt from .claude/agents/)
-gh ai-review 620 --agent security-pentest-reviewer
+# Single agent impersonation
+gh ai-review 42 --agent security-reviewer
 
-# Custom focus area
-gh ai-review 620 --focus "backward compatibility"
+# Custom focus
+gh ai-review 42 --focus "error handling"
 
-# Dry run — print the prompt without calling Gemini
-gh ai-review 620 --dry-run
+# Dry run — see the prompt without calling Gemini
+gh ai-review 42 --dry-run
 
-# Override Gemini model
-gh ai-review 620 --model gemini-2.5-pro
+# Use a different model
+gh ai-review 42 --model gemini-2.5-pro
 ```
 
 ### Flags
@@ -42,64 +51,56 @@ gh ai-review 620 --model gemini-2.5-pro
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--full` | Run full 3-phase review loop | `false` |
-| `--agent <name>` | Agent persona to impersonate | — |
-| `--focus <area>` | Custom focus area for review | — |
+| `--agent <name>` | Run a specific agent persona | — |
+| `--focus <area>` | Custom focus area | — |
 | `--dry-run` | Print prompt, skip Gemini call | `false` |
-| `--model <model>` | Gemini model to use | `gemini-3-flash-preview` |
+| `--model <model>` | Override Gemini model | `gemini-3-flash-preview` |
 | `--version` | Print version | — |
 
-## Review Modes
+## How It Works
 
-### Default (`gh ai-review <PR>`)
+### Default Mode (`gh ai-review <PR>`)
 
-1. Builds review context (PR diff, changed files, project docs)
-2. Runs a **generic code review** (architecture, correctness, performance, security, testing, style)
-3. Auto-detects **focused reviews** based on file categories:
-   - **Security** — triggered by API routes or auth files
-   - **Usability** — triggered by UI components, new routes, or navigation
-   - **Mobile** — triggered by UI, mobile, or design files
-4. Posts a combined PR comment with all results
+1. Fetches PR diff, changed file contents, and project docs (e.g. `CLAUDE.md`)
+2. Categorizes files (UI, API, Auth, Mobile, etc.)
+3. Runs a **generic code review** via Gemini
+4. Auto-triggers **focused reviews** if relevant files detected:
+   - **Security** — API routes or auth files changed
+   - **Usability** — UI components, new routes, navigation
+   - **Mobile** — UI, mobile, or design files
+5. Posts everything as a single PR comment
 
-### Agent Impersonation (`--agent <name>`)
+### Agent Mode (`--agent <name>`)
 
-Reads an agent persona from `<agents_dir>/<name>.md` and runs a deep analysis review.
+Reads a persona prompt from `.claude/agents/<name>.md` and runs a deep-analysis review with extra context:
 
-Agent context includes:
-- All files from the default context
-- **Import resolution** — follows TypeScript/JavaScript imports (relative `./` and alias `@/`)
-- **Sibling files** — other code files in the same directories
-- **Test files** — matching `.test.*`, `.spec.*`, `_test.go` patterns
+- Full file contents of changed files
+- Resolved imports (TypeScript `./` and `@/` aliases)
+- Sibling files from same directories
+- Matching test files (`.test.*`, `.spec.*`, `_test.go`)
 
-If the agent file doesn't exist, lists all available agents.
+See [docs/agents.md](docs/agents.md) for how to write your own agents.
 
 ### Full Loop (`--full`)
 
-Runs all 3 phases sequentially, posting each as a separate PR comment:
+The money mode. Runs 3 phases, each posted as separate PR comments:
 
-| Phase | What | Parallelism |
-|-------|------|-------------|
-| 1/3 | Generic code review | Single |
-| 2/3 | Agent impersonation for recommended reviewers | Parallel (errgroup) |
-| 3/3 | Focused reviews (security, usability, mobile) | Parallel (errgroup) |
+```
+Phase 1/3: Generic Code Review              → 1 comment
+Phase 2/3: Agent Impersonation (parallel)   → 1 comment per agent
+Phase 3/3: Focused Reviews (parallel)       → 1 combined comment
+```
 
-Phase 2 extracts recommended reviewers from the generic review output and impersonates each agent that has a matching `.md` file in the agents directory.
+Phase 2 is the magic: Gemini's generic review recommends agents, and the tool automatically runs every recommended agent that has a matching `.md` file in your agents directory.
 
-## Context Building
+## Setup for Your Repo
 
-The tool builds a budget-aware review context:
+### 1. Config (optional)
 
-1. **Project docs** — loads files from `context_docs` config (e.g. `CLAUDE.md`, code standards)
-2. **Changed files** — fetches content via `git show HEAD:<path>`, skips binaries
-3. **File categorization** — 14 categories (UI, API, Auth, Database, Config, Tests, Docs, Mobile, Design, Copy, NewRoutes, Navigation, EmptyStates, CRUD detection)
-4. **PR diff** — raw diff included in budget
-
-Total context is bounded by `max_context_chars` (default 2M chars, ~500K tokens).
-
-## Configuration
-
-Create `.ai-review.yaml` in your repo root (optional — all fields have sensible defaults):
+Create `.ai-review.yaml` in your repo root to override defaults:
 
 ```yaml
+# All fields optional — these are the defaults
 model: gemini-3-flash-preview
 max_context_chars: 2000000
 agents_dir: .claude/agents
@@ -113,11 +114,34 @@ focused_reviews:
   - mobile
 ```
 
+### 2. Agent Personas (recommended)
+
+Create `.claude/agents/<name>.md` files with review personas. The tool discovers these automatically and Gemini will recommend them during `--full` reviews.
+
+```bash
+mkdir -p .claude/agents
+```
+
+Two starter agents are included in this repo. See [docs/agents.md](docs/agents.md) for the full guide on writing agents.
+
+### 3. Project Docs (recommended)
+
+The tool loads project docs listed in `context_docs` into every review prompt. This gives Gemini your coding standards, architecture decisions, and conventions.
+
+Good candidates:
+- `CLAUDE.md` — project rules and conventions
+- `docs/code-standards.md` — coding style guide
+- `docs/design-system.md` — UI/component patterns
+
+## Context Budget
+
+The tool is budget-aware. All context (docs + files + diff) is bounded by `max_context_chars` (default 2M chars, ~500K tokens). Files are loaded in order until the budget is exhausted — large PRs gracefully skip lower-priority files instead of failing.
+
 ## Development
 
 ```bash
 make build    # Build binary
-make test     # Run tests
+make test     # Run tests (with -race)
 make lint     # Run golangci-lint
 make install  # Build + install as gh extension
 make clean    # Remove binary
@@ -126,33 +150,34 @@ make clean    # Remove binary
 ### Project Structure
 
 ```
-├── main.go              # CLI entry point, flag parsing, dispatch
-├── config/              # YAML config loading with defaults
-├── git/                 # Git command wrappers (show, ls-files, diff)
-├── github/              # gh CLI integration (PR fetch, comment posting)
+├── main.go              # CLI entry, flag parsing, dispatch
+├── config/              # YAML config with defaults
+├── git/                 # Git wrappers (show, ls-files, diff)
+├── github/              # gh CLI integration (PR fetch, comments)
 ├── context/             # Budget-aware context assembly
-│   ├── context.go       # Build + BuildAgent orchestration
-│   ├── categories.go    # 14-category file classification
-│   ├── budget.go        # Token budget tracking
-│   ├── lang.go          # Extension→language mapping, binary detection
-│   ├── imports.go       # TypeScript/JS import resolution
-│   ├── siblings.go      # Sibling file discovery
-│   └── tests.go         # Test file resolution
-├── review/              # Gemini SDK client + review runners
-│   ├── review.go        # RunGeneric, RunFocused, RunAgent, RunFull
-│   ├── prompts.go       # Prompt templates + builders
-│   └── gemini.go        # Gemini API client
-└── output/              # Terminal + PR comment formatting
+│   ├── context.go       #   Build + BuildAgent
+│   ├── categories.go    #   14-category file classification
+│   ├── budget.go        #   Token budget tracking
+│   ├── lang.go          #   Extension→language, binary detection
+│   ├── imports.go       #   TS/JS import resolution
+│   ├── siblings.go      #   Sibling file discovery
+│   └── tests.go         #   Test file resolution
+├── review/              # Gemini client + review runners
+│   ├── review.go        #   RunGeneric, RunFocused, RunAgent, RunFull
+│   ├── prompts.go       #   Prompt templates
+│   └── gemini.go        #   Gemini SDK (sync.Once client)
+├── output/              # Terminal + PR comment formatting
+└── .claude/agents/      # Agent persona prompts
 ```
 
 ## Release
-
-Pushing a `v*` tag triggers the release workflow which cross-compiles binaries via [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile).
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+Cross-compiles via [`cli/gh-extension-precompile`](https://github.com/cli/gh-extension-precompile) on tag push.
 
 ## License
 
