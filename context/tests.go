@@ -10,7 +10,7 @@ import (
 const maxTestLines = 200
 
 // resolveTests finds test files corresponding to changed files.
-func resolveTests(changedFiles []string, loaded map[string]string, budget *Budget) map[string]string {
+func resolveTests(changedFiles []string, loaded map[string]string, budget *Budget, root string) map[string]string {
 	result := make(map[string]string)
 
 	for _, file := range changedFiles {
@@ -28,6 +28,9 @@ func resolveTests(changedFiles []string, loaded map[string]string, budget *Budge
 				continue
 			}
 			if _, ok := result[candidate]; ok {
+				continue
+			}
+			if !IsPathInRepo(root, candidate) {
 				continue
 			}
 

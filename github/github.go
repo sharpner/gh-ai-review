@@ -92,12 +92,16 @@ func PostComment(prNumber int, body string) error {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer os.Remove(tmp.Name())
+	defer tmp.Close()
 
 	if _, err := tmp.WriteString(body); err != nil {
-		tmp.Close()
 		return fmt.Errorf("write comment body: %w", err)
 	}
-	tmp.Close()
+
+	// Flush to disk before gh reads the file
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
 
 	_, _, err = gh.Exec("pr", "comment", fmt.Sprintf("%d", prNumber), "--body-file", tmp.Name())
 	if err != nil {

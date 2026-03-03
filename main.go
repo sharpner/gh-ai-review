@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -33,6 +34,9 @@ type Options struct {
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(gocontext.Background(), os.Interrupt)
+	defer stop()
+
 	fs := flag.NewFlagSet("gh-ai-review", flag.ExitOnError)
 
 	var opts Options
@@ -82,13 +86,13 @@ func main() {
 	}
 	opts.PRNumber = prNumber
 
-	if err := run(opts); err != nil {
+	if err := run(ctx, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(opts Options) error {
+func run(ctx gocontext.Context, opts Options) error {
 	// 1. Load config
 	root, err := git.Root()
 	if err != nil {
@@ -121,15 +125,15 @@ func run(opts Options) error {
 
 	// 5. Dispatch
 	if opts.Agent != "" {
-		return runAgent(pr, cfg, model, repoSlug, opts)
+		return runAgent(ctx, pr, cfg, model, repoSlug, opts)
 	}
 	if opts.Full {
-		return runFull(pr, cfg, model, repoSlug, opts)
+		return runFull(ctx, pr, cfg, model, repoSlug, opts)
 	}
-	return runDefault(pr, cfg, model, repoSlug, opts)
+	return runDefault(ctx, pr, cfg, model, repoSlug, opts)
 }
 
-func runAgent(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runAgent(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
 	root, err := git.Root()
 	if err != nil {
 		return err
@@ -145,15 +149,15 @@ func runAgent(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Opti
 	}
 
 	fmt.Fprintf(os.Stderr, "Building agent context for %s...\n", opts.Agent)
-	ctx, err := rcontext.BuildAgent(pr, cfg, opts.Agent, string(agentPrompt))
+	agentCtx, err := rcontext.BuildAgent(pr, cfg, opts.Agent, string(agentPrompt))
 	if err != nil {
 		return fmt.Errorf("build agent context: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Context: %d files, %d imports, %d siblings, %d tests\n",
-		len(ctx.FileContents), len(ctx.Imports), len(ctx.Siblings), len(ctx.Tests))
+		len(agentCtx.FileContents), len(agentCtx.Imports), len(agentCtx.Siblings), len(agentCtx.Tests))
 
-	result, err := review.RunAgent(ctx, model, opts.DryRun)
+	result, err := review.RunAgent(ctx, agentCtx, model, opts.DryRun)
 	if err != nil {
 		return err
 	}
@@ -178,24 +182,24 @@ func runAgent(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Opti
 	return nil
 }
 
-func runFull(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runFull(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
 	fmt.Fprintln(os.Stderr, "========================================================")
 	fmt.Fprintf(os.Stderr, "  Gemini Full Review Loop — PR #%d\n", opts.PRNumber)
 	fmt.Fprintf(os.Stderr, "  Model: %s\n", model)
 	fmt.Fprintln(os.Stderr, "========================================================")
 
 	fmt.Fprintln(os.Stderr, "\nBuilding review context...")
-	ctx, err := rcontext.Build(pr, cfg)
+	reviewCtx, err := rcontext.Build(pr, cfg)
 	if err != nil {
 		return fmt.Errorf("build context: %w", err)
 	}
-	ctx.Focus = opts.Focus
+	reviewCtx.Focus = opts.Focus
 
 	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
-		len(ctx.FileContents), ctx.FilesSkipped, ctx.TokenEstimate)
+		len(reviewCtx.FileContents), reviewCtx.FilesSkipped, reviewCtx.TokenEstimate)
 
 	if opts.DryRun {
-		result, dryErr := review.RunGeneric(ctx, model, true)
+		result, dryErr := review.RunGeneric(ctx, reviewCtx, model, true)
 		if dryErr != nil {
 			return dryErr
 		}
@@ -203,7 +207,7 @@ func runFull(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Optio
 		return nil
 	}
 
-	results, err := review.RunFull(pr, ctx, cfg, model, false, opts.PRNumber)
+	results, err := review.RunFull(ctx, pr, reviewCtx, cfg, model, false, opts.PRNumber)
 	if err != nil {
 		return err
 	}
@@ -212,20 +216,20 @@ func runFull(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Optio
 	return nil
 }
 
-func runDefault(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
+func runDefault(ctx gocontext.Context, pr gh.PRData, cfg config.Config, model, repoSlug string, opts Options) error {
 	fmt.Fprintln(os.Stderr, "Building review context...")
-	ctx, err := rcontext.Build(pr, cfg)
+	reviewCtx, err := rcontext.Build(pr, cfg)
 	if err != nil {
 		return fmt.Errorf("build context: %w", err)
 	}
-	ctx.Focus = opts.Focus
+	reviewCtx.Focus = opts.Focus
 
 	fmt.Fprintf(os.Stderr, "Context: %d files included, %d skipped (~%d tokens)\n",
-		len(ctx.FileContents), ctx.FilesSkipped, ctx.TokenEstimate)
+		len(reviewCtx.FileContents), reviewCtx.FilesSkipped, reviewCtx.TokenEstimate)
 
 	// Generic review
 	fmt.Fprintf(os.Stderr, "\nRunning reviews with %s...\n", model)
-	generic, err := review.RunGeneric(ctx, model, opts.DryRun)
+	generic, err := review.RunGeneric(ctx, reviewCtx, model, opts.DryRun)
 	if err != nil {
 		return fmt.Errorf("generic review: %w", err)
 	}
@@ -238,18 +242,18 @@ func runDefault(pr gh.PRData, cfg config.Config, model, repoSlug string, opts Op
 	results := []review.Result{generic}
 
 	// Focused reviews in PARALLEL (matching bash behavior)
-	focuses := review.DetermineFocuses(ctx.Categories)
+	focuses := review.DetermineFocuses(reviewCtx.Categories)
 	if len(focuses) > 0 {
 		for _, focus := range focuses {
 			fmt.Fprintf(os.Stderr, "  [%s] started\n", focus)
 		}
 
-		g, _ := errgroup.WithContext(gocontext.Background())
+		g, gctx := errgroup.WithContext(ctx)
 		focusResults := make([]review.Result, len(focuses))
 
 		for i, focus := range focuses {
 			g.Go(func() error {
-				result, runErr := review.RunFocused(ctx, focus, model, false)
+				result, runErr := review.RunFocused(gctx, reviewCtx, focus, model, false)
 				if runErr != nil {
 					fmt.Fprintf(os.Stderr, "  [%s] failed: %v\n", focus, runErr)
 					return nil // don't fail the whole group

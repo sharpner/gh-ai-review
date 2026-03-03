@@ -11,13 +11,13 @@ import (
 var importRe = regexp.MustCompile(`^import.*from\s+['"]([^'"]+)['"]`)
 
 const (
-	maxImports       = 10
+	maxImports        = 10
 	maxImportsPerFile = 5
-	maxImportLines   = 200
+	maxImportLines    = 200
 )
 
 // resolveImports finds imported files referenced by changed files that are not already loaded.
-func resolveImports(changedFiles []string, loaded map[string]string, budget *Budget) map[string]string {
+func resolveImports(changedFiles []string, loaded map[string]string, budget *Budget, root string) map[string]string {
 	result := make(map[string]string)
 	total := 0
 
@@ -59,7 +59,12 @@ func resolveImports(changedFiles []string, loaded map[string]string, budget *Bud
 				resolved = filepath.Join(filepath.Dir(file), importPath)
 			}
 
-			found := tryResolve(resolved, loaded, result, budget)
+			// Validate resolved path stays within repo
+			if !IsPathInRepo(root, resolved) {
+				continue
+			}
+
+			found := tryResolve(resolved, loaded, result, budget, root)
 			if found {
 				total++
 				perFile++
@@ -69,10 +74,13 @@ func resolveImports(changedFiles []string, loaded map[string]string, budget *Bud
 	return result
 }
 
-func tryResolve(base string, loaded, result map[string]string, budget *Budget) bool {
+func tryResolve(base string, loaded, result map[string]string, budget *Budget, root string) bool {
 	extensions := []string{"", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx"}
 	for _, ext := range extensions {
 		candidate := base + ext
+		if !IsPathInRepo(root, candidate) {
+			continue
+		}
 		if _, ok := loaded[candidate]; ok {
 			continue
 		}

@@ -7,14 +7,14 @@ import (
 )
 
 const (
-	maxSiblings      = 6
+	maxSiblings       = 6
 	maxSiblingsPerDir = 4
-	maxSiblingLines  = 150
-	maxSiblingBytes  = 30_000
+	maxSiblingLines   = 150
+	maxSiblingBytes   = 30_000
 )
 
 // resolveSiblings finds sibling files in the same directories as changed files.
-func resolveSiblings(changedFiles []string, loaded map[string]string, budget *Budget) map[string]string {
+func resolveSiblings(changedFiles []string, loaded map[string]string, budget *Budget, root string) map[string]string {
 	result := make(map[string]string)
 	total := 0
 	seenDirs := make(map[string]bool)
@@ -29,6 +29,10 @@ func resolveSiblings(changedFiles []string, loaded map[string]string, budget *Bu
 			continue
 		}
 		seenDirs[dir] = true
+
+		if !IsPathInRepo(root, dir) {
+			continue
+		}
 
 		files, err := git.LsFiles(dir)
 		if err != nil {
@@ -49,6 +53,9 @@ func resolveSiblings(changedFiles []string, loaded map[string]string, budget *Bu
 				continue
 			}
 			if _, ok := result[sibling]; ok {
+				continue
+			}
+			if !IsPathInRepo(root, sibling) {
 				continue
 			}
 
@@ -73,4 +80,3 @@ func resolveSiblings(changedFiles []string, loaded map[string]string, budget *Bu
 	}
 	return result
 }
-

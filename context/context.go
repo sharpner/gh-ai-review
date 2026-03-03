@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sharpner/gh-ai-review/config"
 	"github.com/sharpner/gh-ai-review/git"
@@ -67,6 +68,9 @@ func Build(pr gh.PRData, cfg config.Config) (ReviewContext, error) {
 		if IsBinary(file) {
 			continue
 		}
+		if !IsPathInRepo(root, file) {
+			continue
+		}
 		content, err := git.Show("HEAD", file)
 		if err != nil {
 			continue
@@ -93,7 +97,7 @@ func Build(pr gh.PRData, cfg config.Config) (ReviewContext, error) {
 		FileContents:  files,
 		Categories:    cats,
 		FilesSkipped:  skipped,
-		TokenEstimate: (budget.Max - budget.Remaining) / 4,
+		TokenEstimate: budget.TokenEstimate(),
 		CRUDInDiff:    DetectCRUDInDiff(pr.Diff),
 		Complex:       IsComplex(len(pr.ChangedFiles), totalChanges),
 	}, nil
@@ -107,8 +111,13 @@ func BuildAgent(pr gh.PRData, cfg config.Config, agentName, agentPrompt string) 
 	}
 
 	// Shared budget continues from Build
-	remaining := cfg.MaxContextChars - (ctx.TokenEstimate * 4)
+	remaining := cfg.MaxContextChars - (ctx.TokenEstimate * CharsPerToken)
 	budget := &Budget{Max: cfg.MaxContextChars, Remaining: remaining}
+
+	root, err := git.Root()
+	if err != nil {
+		return AgentContext{}, fmt.Errorf("git root: %w", err)
+	}
 
 	// Build a merged "loaded" map for deduplication
 	loaded := make(map[string]string, len(ctx.FileContents))
@@ -116,17 +125,17 @@ func BuildAgent(pr gh.PRData, cfg config.Config, agentName, agentPrompt string) 
 		loaded[k] = v
 	}
 
-	imports := resolveImports(pr.ChangedFiles, loaded, budget)
+	imports := resolveImports(pr.ChangedFiles, loaded, budget, root)
 	for k, v := range imports {
 		loaded[k] = v
 	}
 
-	siblings := resolveSiblings(pr.ChangedFiles, loaded, budget)
+	siblings := resolveSiblings(pr.ChangedFiles, loaded, budget, root)
 	for k, v := range siblings {
 		loaded[k] = v
 	}
 
-	tests := resolveTests(pr.ChangedFiles, loaded, budget)
+	tests := resolveTests(pr.ChangedFiles, loaded, budget, root)
 
 	return AgentContext{
 		ReviewContext: ctx,
@@ -136,4 +145,11 @@ func BuildAgent(pr gh.PRData, cfg config.Config, agentName, agentPrompt string) 
 		Siblings:      siblings,
 		Tests:         tests,
 	}, nil
+}
+
+// IsPathInRepo checks that a path resolves within the repository root.
+// Prevents path traversal attacks via malicious import paths.
+func IsPathInRepo(root, path string) bool {
+	abs := filepath.Join(root, filepath.Clean(path))
+	return strings.HasPrefix(abs, root)
 }
