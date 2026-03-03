@@ -56,7 +56,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  gh ai-review 620 --dry-run\n")
 	}
 
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	// Reorder args: Go's flag package stops at the first non-flag argument.
+	// We need "gh ai-review 620 --dry-run" to work the same as "gh ai-review --dry-run 620".
+	reordered := reorderArgs(os.Args[1:])
+
+	if err := fs.Parse(reordered); err != nil {
 		os.Exit(1)
 	}
 
@@ -302,4 +306,34 @@ func printAvailableAgents(agentsDir string) {
 	for _, a := range agents {
 		fmt.Fprintf(os.Stderr, "  - %s\n", a)
 	}
+}
+
+// reorderArgs moves flags before positional arguments so Go's flag package
+// can parse "gh ai-review 620 --dry-run" correctly.
+func reorderArgs(args []string) []string {
+	var flags, positional []string
+	i := 0
+	for i < len(args) {
+		if strings.HasPrefix(args[i], "-") {
+			flags = append(flags, args[i])
+			// Flags with values: --agent foo, --focus "text", --model gemini-2.5-flash
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") && needsValue(args[i]) {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			positional = append(positional, args[i])
+		}
+		i++
+	}
+	return append(flags, positional...)
+}
+
+func needsValue(flag string) bool {
+	f := strings.TrimLeft(flag, "-")
+	switch f {
+	case "agent", "focus", "model":
+		return true
+	}
+	return false
 }
