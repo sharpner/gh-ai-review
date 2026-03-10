@@ -22,7 +22,7 @@ import (
 	"github.com/sharpner/gh-ai-review/review"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 type Options struct {
 	PRNumber int
