@@ -9,6 +9,9 @@ import (
 func TestDefaults(t *testing.T) {
 	cfg := defaults()
 
+	if cfg.Provider != DefaultProvider {
+		t.Errorf("provider = %q, want %q", cfg.Provider, DefaultProvider)
+	}
 	if cfg.Model != DefaultModel {
 		t.Errorf("model = %q, want %q", cfg.Model, DefaultModel)
 	}
@@ -60,6 +63,71 @@ agents_dir: custom/agents
 	}
 	if cfg.AgentsDir != "custom/agents" {
 		t.Errorf("agents_dir = %q, want custom/agents", cfg.AgentsDir)
+	}
+}
+
+func TestLoad_NoProviderField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("model: gemini-2.5-pro\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != DefaultProvider {
+		t.Errorf("provider = %q, want %q (default when omitted)", cfg.Provider, DefaultProvider)
+	}
+}
+
+func TestLoad_ProviderCodex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: codex\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != "codex" {
+		t.Errorf("provider = %q, want codex", cfg.Provider)
+	}
+}
+
+func TestLoad_ProviderCaseNormalization(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: Codex\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != "codex" {
+		t.Errorf("provider = %q, want codex (normalized)", cfg.Provider)
+	}
+}
+
+func TestLoad_InvalidProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: openai\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid provider")
 	}
 }
 

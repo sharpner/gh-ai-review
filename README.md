@@ -1,6 +1,6 @@
 # gh-ai-review
 
-AI-powered pull request reviews using Google Gemini, as a `gh` CLI extension.
+AI-powered pull request reviews as a `gh` CLI extension. Supports **Gemini** and **Codex (GPT-5.4 via ChatGPT Pro)** as LLM providers.
 
 One command reviews your PR — generic code review, security/usability/mobile focused reviews, and agent impersonation with deep context. All posted as PR comments.
 
@@ -10,19 +10,25 @@ One command reviews your PR — generic code review, security/usability/mobile f
 # 1. Install
 gh extension install sharpner/gh-ai-review
 
-# 2. Set your Gemini API key
+# 2a. Gemini (default) — set API key
 export GOOGLE_API_KEY="your-key-here"
 
+# 2b. Codex — install CLI and log in
+brew install codex   # or: npm install -g @openai/codex
+codex                # sign in with ChatGPT
+
 # 3. Review a PR
-gh ai-review 42
+gh ai-review 42                     # uses Gemini by default
+gh ai-review 42 --provider codex    # uses GPT-5.4 via Codex
 ```
 
-That's it. The tool reads your repo, builds context, calls Gemini, and posts a review comment.
+That's it. The tool reads your repo, builds context, calls the LLM, and posts a review comment.
 
 ## Prerequisites
 
 - [`gh`](https://cli.github.com/) CLI installed and authenticated (`gh auth login`)
-- `GOOGLE_API_KEY` environment variable ([get one here](https://aistudio.google.com/apikey))
+- **Gemini provider:** `GOOGLE_API_KEY` environment variable ([get one here](https://aistudio.google.com/apikey))
+- **Codex provider:** [`codex`](https://github.com/openai/codex) CLI installed and authenticated (`codex` → sign in)
 
 ## Usage
 
@@ -39,22 +45,27 @@ gh ai-review 42 --agent security-reviewer
 # Custom focus
 gh ai-review 42 --focus "error handling"
 
-# Dry run — see the prompt without calling Gemini
+# Use Codex (GPT-5.4) instead of Gemini
+gh ai-review 42 --provider codex
+
+# Dry run — see the prompt without calling the LLM
 gh ai-review 42 --dry-run
 
 # Use a different model
 gh ai-review 42 --model gemini-2.5-pro
+gh ai-review 42 --provider codex --model o4-mini
 ```
 
 ### Flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
+| `--provider <name>` | LLM provider: `gemini` or `codex` | `gemini` |
 | `--full` | Run full 3-phase review loop | `false` |
 | `--agent <name>` | Run a specific agent persona | — |
 | `--focus <area>` | Custom focus area | — |
-| `--dry-run` | Print prompt, skip Gemini call | `false` |
-| `--model <model>` | Override Gemini model | `gemini-3-flash-preview` |
+| `--dry-run` | Print prompt, skip LLM call | `false` |
+| `--model <model>` | Override model | per provider |
 | `--version` | Print version | — |
 
 ## How It Works
@@ -63,7 +74,7 @@ gh ai-review 42 --model gemini-2.5-pro
 
 1. Fetches PR diff, changed file contents, and project docs (e.g. `CLAUDE.md`)
 2. Categorizes files (UI, API, Auth, Mobile, etc.)
-3. Runs a **generic code review** via Gemini
+3. Runs a **generic code review** via the configured LLM provider
 4. Auto-triggers **focused reviews** if relevant files detected:
    - **Security** — API routes or auth files changed
    - **Usability** — UI components, new routes, navigation
@@ -91,7 +102,7 @@ Phase 2/3: Agent Impersonation (parallel)   → 1 comment per agent
 Phase 3/3: Focused Reviews (parallel)       → 1 combined comment
 ```
 
-Phase 2 is the magic: Gemini's generic review recommends agents, and the tool automatically runs every recommended agent that has a matching `.md` file in your agents directory.
+Phase 2 is the magic: the generic review recommends agents, and the tool automatically runs every recommended agent that has a matching `.md` file in your agents directory.
 
 ## Setup for Your Repo
 
@@ -101,7 +112,8 @@ Create `.ai-review.yaml` in your repo root to override defaults:
 
 ```yaml
 # All fields optional — these are the defaults
-model: gemini-3-flash-preview
+provider: gemini                  # or: codex
+model: gemini-3-flash-preview     # codex default: gpt-5.4
 max_context_chars: 2000000
 agents_dir: .claude/agents
 context_docs:
@@ -126,7 +138,7 @@ Two starter agents are included in this repo. See [docs/agents.md](docs/agents.m
 
 ### 3. Project Docs (recommended)
 
-The tool loads project docs listed in `context_docs` into every review prompt. This gives Gemini your coding standards, architecture decisions, and conventions.
+The tool loads project docs listed in `context_docs` into every review prompt. This gives the LLM your coding standards, architecture decisions, and conventions.
 
 Good candidates:
 - `CLAUDE.md` — project rules and conventions
@@ -162,10 +174,12 @@ make clean    # Remove binary
 │   ├── imports.go       #   TS/JS import resolution
 │   ├── siblings.go      #   Sibling file discovery
 │   └── tests.go         #   Test file resolution
-├── review/              # Gemini client + review runners
+├── review/              # LLM providers + review runners
 │   ├── review.go        #   RunGeneric, RunFocused, RunAgent, RunFull
+│   ├── provider.go      #   Provider abstraction (CallLLM, Invoke)
 │   ├── prompts.go       #   Prompt templates
-│   └── gemini.go        #   Gemini SDK (sync.Once client)
+│   ├── gemini.go        #   Gemini SDK (sync.Once client)
+│   └── codex.go         #   Codex CLI wrapper (os/exec, read-only sandbox)
 ├── output/              # Terminal + PR comment formatting
 └── .claude/agents/      # Agent persona prompts
 ```

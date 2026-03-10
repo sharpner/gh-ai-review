@@ -31,9 +31,9 @@ func initClient(ctx context.Context) (*genai.Client, error) {
 	return geminiClient, geminiErr
 }
 
-// callGemini sends a prompt to the Gemini API and returns the response text.
+// CallGemini sends a prompt to the Gemini API and returns the response text.
 // The client is created once and reused across all calls.
-func callGemini(ctx context.Context, model, prompt string) (string, error) {
+func CallGemini(ctx context.Context, model, prompt string) (string, error) {
 	client, err := initClient(ctx)
 	if err != nil {
 		return "", err

@@ -1,18 +1,29 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+var validProviders = map[string]bool{
+	"gemini": true,
+	"codex":  true,
+}
+
 const (
-	DefaultModel           = "gemini-3-flash-preview"
+	DefaultProvider        = "gemini"
+	DefaultGeminiModel     = "gemini-3-flash-preview"
+	DefaultCodexModel      = "gpt-5.4"
+	DefaultModel           = DefaultGeminiModel
 	DefaultMaxContextChars = 2_000_000
 	DefaultConfigFile      = ".ai-review.yaml"
 )
 
 type Config struct {
+	Provider        string   `yaml:"provider"`
 	Model           string   `yaml:"model"`
 	MaxContextChars int      `yaml:"max_context_chars"`
 	AgentsDir       string   `yaml:"agents_dir"`
@@ -35,11 +46,20 @@ func Load(path string) (Config, error) {
 		return cfg, err
 	}
 
+	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if cfg.Provider == "" {
+		cfg.Provider = DefaultProvider
+	}
+	if !validProviders[cfg.Provider] {
+		return cfg, fmt.Errorf("invalid provider %q in config (supported: gemini, codex)", cfg.Provider)
+	}
+
 	return cfg, nil
 }
 
 func defaults() Config {
 	return Config{
+		Provider:        DefaultProvider,
 		Model:           DefaultModel,
 		MaxContextChars: DefaultMaxContextChars,
 		AgentsDir:       ".claude/agents",

@@ -2,6 +2,9 @@ package main
 
 import (
 	"testing"
+
+	"github.com/sharpner/gh-ai-review/config"
+	"github.com/sharpner/gh-ai-review/review"
 )
 
 func TestReorderArgs_FlagsAfterPositional(t *testing.T) {
@@ -74,6 +77,121 @@ func TestReorderArgs_FocusWithSpaces(t *testing.T) {
 	}
 }
 
+func TestReorderArgs_ProviderFlag(t *testing.T) {
+	args := []string{"1", "--provider", "codex", "--dry-run"}
+	got := reorderArgs(args)
+
+	expected := []string{"--provider", "codex", "--dry-run", "1"}
+	if len(got) != len(expected) {
+		t.Fatalf("got %v, want %v", got, expected)
+	}
+	for i := range expected {
+		if got[i] != expected[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], expected[i])
+		}
+	}
+}
+
+func TestResolveProvider_Gemini(t *testing.T) {
+	p, err := resolveProvider("gemini")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.Label != "Gemini" {
+		t.Errorf("label = %q, want Gemini", p.Label)
+	}
+	if p.Call == nil {
+		t.Fatal("Call is nil")
+	}
+}
+
+func TestResolveProvider_Codex(t *testing.T) {
+	p, err := resolveProvider("codex")
+	if review.CodexAvailable() {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if p.Label != "Codex" {
+			t.Errorf("label = %q, want Codex", p.Label)
+		}
+		if p.Call == nil {
+			t.Fatal("Call is nil")
+		}
+	} else {
+		if err == nil {
+			t.Fatal("expected error when codex not on PATH")
+		}
+	}
+}
+
+func TestResolveProvider_Unknown(t *testing.T) {
+	_, err := resolveProvider("openai")
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+}
+
+func TestResolveModel_FlagOverride(t *testing.T) {
+	got, err := resolveModel("o4-mini", config.DefaultGeminiModel, review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "o4-mini" {
+		t.Errorf("got %q, want o4-mini", got)
+	}
+}
+
+func TestResolveModel_CodexDefault(t *testing.T) {
+	got, err := resolveModel("", config.DefaultGeminiModel, review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultCodexModel {
+		t.Errorf("got %q, want %q", got, config.DefaultCodexModel)
+	}
+}
+
+func TestResolveModel_GeminiDefault(t *testing.T) {
+	got, err := resolveModel("", config.DefaultGeminiModel, review.ProviderGemini)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultGeminiModel {
+		t.Errorf("got %q, want %q", got, config.DefaultGeminiModel)
+	}
+}
+
+func TestResolveModel_IncompatibleGeminiModelWithCodex(t *testing.T) {
+	got, err := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultCodexModel {
+		t.Errorf("got %q, want %q (should auto-switch to codex default)", got, config.DefaultCodexModel)
+	}
+}
+
+func TestResolveModel_IncompatibleGPTModelWithGemini(t *testing.T) {
+	got, err := resolveModel("", "gpt-5.4", review.ProviderGemini)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultGeminiModel {
+		t.Errorf("got %q, want %q (should auto-switch to gemini default)", got, config.DefaultGeminiModel)
+	}
+}
+
+func TestResolveModel_FlagOverridesIncompatibilityCheck(t *testing.T) {
+	// Explicit --model flag bypasses compatibility check (user knows what they're doing)
+	got, err := resolveModel("gemini-2.5-pro", "gemini-2.5-pro", review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "gemini-2.5-pro" {
+		t.Errorf("got %q, want gemini-2.5-pro", got)
+	}
+}
+
 func TestNeedsValue(t *testing.T) {
 	tests := []struct {
 		flag string
@@ -82,6 +200,7 @@ func TestNeedsValue(t *testing.T) {
 		{"--agent", true},
 		{"--focus", true},
 		{"--model", true},
+		{"--provider", true},
 		{"--dry-run", false},
 		{"--full", false},
 		{"--version", false},
