@@ -9,16 +9,25 @@ import (
 	"strings"
 )
 
-// CallCodex sends a prompt to the Codex CLI and returns the response text.
+// MakeCodexCaller returns a CallLLM function that uses the given absolute binary path.
+// Resolving the path at init time prevents PATH manipulation between check and execution.
+func MakeCodexCaller(codexBin string) CallLLM {
+	return func(ctx context.Context, model, prompt string) (string, error) {
+		return callCodex(ctx, codexBin, model, prompt)
+	}
+}
+
+// callCodex sends a prompt to the Codex CLI and returns the response text.
 // It invokes the codex binary in non-interactive mode via os/exec.
 // Authentication is handled by the Codex CLI's cached OAuth credentials.
 //
 // Security: the sandbox is set to read-only (-s read-only) so the Codex agent
 // cannot modify files or execute arbitrary commands. The prompt contains PR
 // content which is untrusted input; read-only sandbox prevents prompt injection
-// from escalating to code execution.
-func CallCodex(ctx context.Context, model, prompt string) (string, error) {
-	cmd := exec.CommandContext(ctx, "codex", "exec",
+// from escalating to code execution. Environment is filtered to prevent leaking
+// sensitive vars (API keys, tokens).
+func callCodex(ctx context.Context, codexBin, model, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, codexBin, "exec",
 		"-m", model,
 		"-s", "read-only",
 		"--skip-git-repo-check",
@@ -55,6 +64,12 @@ func CallCodex(ctx context.Context, model, prompt string) (string, error) {
 func CodexAvailable() bool {
 	_, err := exec.LookPath("codex")
 	return err == nil
+}
+
+// CodexPath returns the resolved absolute path of the codex binary.
+// This pins the binary at startup to prevent PATH manipulation later.
+func CodexPath() (string, error) {
+	return exec.LookPath("codex")
 }
 
 // filteredEnv returns a minimal set of env vars for the codex subprocess.

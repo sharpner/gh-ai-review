@@ -132,30 +132,57 @@ func TestResolveProvider_Unknown(t *testing.T) {
 }
 
 func TestResolveModel_FlagOverride(t *testing.T) {
-	got := resolveModel("o4-mini", config.DefaultGeminiModel, review.ProviderCodex)
+	got, err := resolveModel("o4-mini", config.DefaultGeminiModel, review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "o4-mini" {
 		t.Errorf("got %q, want o4-mini", got)
 	}
 }
 
 func TestResolveModel_CodexDefault(t *testing.T) {
-	got := resolveModel("", config.DefaultGeminiModel, review.ProviderCodex)
+	got, err := resolveModel("", config.DefaultGeminiModel, review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != config.DefaultCodexModel {
 		t.Errorf("got %q, want %q", got, config.DefaultCodexModel)
 	}
 }
 
 func TestResolveModel_GeminiDefault(t *testing.T) {
-	got := resolveModel("", config.DefaultGeminiModel, review.ProviderGemini)
+	got, err := resolveModel("", config.DefaultGeminiModel, review.ProviderGemini)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != config.DefaultGeminiModel {
 		t.Errorf("got %q, want %q", got, config.DefaultGeminiModel)
 	}
 }
 
-func TestResolveModel_CustomConfigModel(t *testing.T) {
-	got := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
+func TestResolveModel_IncompatibleGeminiModelWithCodex(t *testing.T) {
+	_, err := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
+	if err == nil {
+		t.Fatal("expected error for gemini model with codex provider")
+	}
+}
+
+func TestResolveModel_IncompatibleGPTModelWithGemini(t *testing.T) {
+	_, err := resolveModel("", "gpt-5.4", review.ProviderGemini)
+	if err == nil {
+		t.Fatal("expected error for gpt model with gemini provider")
+	}
+}
+
+func TestResolveModel_FlagOverridesIncompatibilityCheck(t *testing.T) {
+	// Explicit --model flag bypasses compatibility check (user knows what they're doing)
+	got, err := resolveModel("gemini-2.5-pro", "gemini-2.5-pro", review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "gemini-2.5-pro" {
-		t.Errorf("got %q, want gemini-2.5-pro (user explicitly set model in config)", got)
+		t.Errorf("got %q, want gemini-2.5-pro", got)
 	}
 }
 

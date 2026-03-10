@@ -116,7 +116,10 @@ func run(ctx gocontext.Context, opts Options) error {
 	}
 
 	// 3. Resolve model: flag > config > provider default
-	model := resolveModel(opts.Model, cfg.Model, providerName)
+	model, err := resolveModel(opts.Model, cfg.Model, providerName)
+	if err != nil {
+		return err
+	}
 
 	// 4. Fetch repo slug for PR URLs
 	repoSlug, _ := gh.RepoSlug()
@@ -377,11 +380,12 @@ func resolveProvider(name string) (review.Provider, error) {
 			Label: "Gemini",
 		}, nil
 	case review.ProviderCodex:
-		if !review.CodexAvailable() {
+		codexBin, pathErr := review.CodexPath()
+		if pathErr != nil {
 			return review.Provider{}, fmt.Errorf("codex CLI not found on PATH — install with: npm install -g @openai/codex")
 		}
 		return review.Provider{
-			Call:  review.CallCodex,
+			Call:  review.MakeCodexCaller(codexBin),
 			Label: "Codex",
 		}, nil
 	}
@@ -391,23 +395,23 @@ func resolveProvider(name string) (review.Provider, error) {
 // resolveModel determines the model to use. Priority: flag > config > provider default.
 // Each provider has its own default model. If the config still has the default for a
 // different provider, we switch to the correct default for the active provider.
-// Warns on stderr if an explicitly-set config model looks incompatible with the provider.
-func resolveModel(flagModel, cfgModel, providerName string) string {
+// Returns an error if a config model is clearly incompatible with the provider.
+func resolveModel(flagModel, cfgModel, providerName string) (string, error) {
 	if flagModel != "" {
-		return flagModel
+		return flagModel, nil
 	}
 	// If config model is the default for a different provider, use this provider's default
 	if cfgModel == defaultModelForProvider(config.DefaultProvider) && providerName != config.DefaultProvider {
-		return defaultModelForProvider(providerName)
+		return defaultModelForProvider(providerName), nil
 	}
-	// Warn if model looks like it belongs to a different provider
+	// Reject known-incompatible provider/model combinations
 	if providerName == review.ProviderCodex && strings.HasPrefix(cfgModel, "gemini") {
-		fmt.Fprintf(os.Stderr, "warning: model %q may not be compatible with provider %q — use --model to override\n", cfgModel, providerName)
+		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to specify a Codex-compatible model (default: %s)", cfgModel, providerName, config.DefaultCodexModel)
 	}
 	if providerName == review.ProviderGemini && (strings.HasPrefix(cfgModel, "gpt") || strings.HasPrefix(cfgModel, "o4") || strings.HasPrefix(cfgModel, "o3")) {
-		fmt.Fprintf(os.Stderr, "warning: model %q may not be compatible with provider %q — use --model to override\n", cfgModel, providerName)
+		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to specify a Gemini-compatible model (default: %s)", cfgModel, providerName, config.DefaultGeminiModel)
 	}
-	return cfgModel
+	return cfgModel, nil
 }
 
 func defaultModelForProvider(provider string) string {
