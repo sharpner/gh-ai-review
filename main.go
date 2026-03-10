@@ -110,7 +110,7 @@ func run(ctx gocontext.Context, opts Options) error {
 	// 2. Resolve provider: flag > config > default
 	providerName := cfg.Provider
 	if opts.Provider != "" {
-		providerName = opts.Provider
+		providerName = strings.ToLower(strings.TrimSpace(opts.Provider))
 	}
 
 	provider, err := resolveProvider(providerName)
@@ -384,14 +384,21 @@ func resolveProvider(name string) (review.Provider, error) {
 // resolveModel determines the model to use. Priority: flag > config > provider default.
 // Each provider has its own default model. If the config still has the default for a
 // different provider, we switch to the correct default for the active provider.
+// Warns on stderr if an explicitly-set config model looks incompatible with the provider.
 func resolveModel(flagModel, cfgModel, providerName string) string {
 	if flagModel != "" {
 		return flagModel
 	}
-	// If config model is any known default for a *different* provider, use this provider's default
-	providerDefault := defaultModelForProvider(providerName)
+	// If config model is the default for a different provider, use this provider's default
 	if cfgModel == defaultModelForProvider(config.DefaultProvider) && providerName != config.DefaultProvider {
-		return providerDefault
+		return defaultModelForProvider(providerName)
+	}
+	// Warn if model looks like it belongs to a different provider
+	if providerName == review.ProviderCodex && strings.HasPrefix(cfgModel, "gemini") {
+		fmt.Fprintf(os.Stderr, "warning: model %q may not be compatible with provider %q — use --model to override\n", cfgModel, providerName)
+	}
+	if providerName == review.ProviderGemini && (strings.HasPrefix(cfgModel, "gpt") || strings.HasPrefix(cfgModel, "o4") || strings.HasPrefix(cfgModel, "o3")) {
+		fmt.Fprintf(os.Stderr, "warning: model %q may not be compatible with provider %q — use --model to override\n", cfgModel, providerName)
 	}
 	return cfgModel
 }
