@@ -74,6 +74,21 @@ func TestReorderArgs_FocusWithSpaces(t *testing.T) {
 	}
 }
 
+func TestReorderArgs_ProviderFlag(t *testing.T) {
+	args := []string{"1", "--provider", "codex", "--dry-run"}
+	got := reorderArgs(args)
+
+	expected := []string{"--provider", "codex", "--dry-run", "1"}
+	if len(got) != len(expected) {
+		t.Fatalf("got %v, want %v", got, expected)
+	}
+	for i := range expected {
+		if got[i] != expected[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], expected[i])
+		}
+	}
+}
+
 func TestNeedsValue(t *testing.T) {
 	tests := []struct {
 		flag string
@@ -82,6 +97,7 @@ func TestNeedsValue(t *testing.T) {
 		{"--agent", true},
 		{"--focus", true},
 		{"--model", true},
+		{"--provider", true},
 		{"--dry-run", false},
 		{"--full", false},
 		{"--version", false},

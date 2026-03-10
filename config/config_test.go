@@ -9,6 +9,9 @@ import (
 func TestDefaults(t *testing.T) {
 	cfg := defaults()
 
+	if cfg.Provider != DefaultProvider {
+		t.Errorf("provider = %q, want %q", cfg.Provider, DefaultProvider)
+	}
 	if cfg.Model != DefaultModel {
 		t.Errorf("model = %q, want %q", cfg.Model, DefaultModel)
 	}

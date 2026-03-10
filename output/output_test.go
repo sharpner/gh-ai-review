@@ -13,7 +13,7 @@ func TestFormatCombinedComment(t *testing.T) {
 		{Label: "Security Review", Body: "Review body 2"},
 	}
 
-	comment := FormatCombinedComment(results, "gemini-3-flash", 5000, 42)
+	comment := FormatCombinedComment(results, "Gemini", "gemini-3-flash", 5000, 42)
 
 	if !strings.Contains(comment, "Review body 1") {
 		t.Error("missing first review body")
@@ -39,7 +39,7 @@ func TestFormatAgentComment(t *testing.T) {
 		PromptTokens: 10000,
 	}
 
-	comment := FormatAgentComment(result, "security-reviewer", "gemini-3-flash", 10000, 15, 42)
+	comment := FormatAgentComment(result, "security-reviewer", "Gemini", "gemini-3-flash", 10000, 15, 42)
 
 	if !strings.Contains(comment, "Agent review body") {
 		t.Error("missing review body")

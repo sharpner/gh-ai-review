@@ -7,12 +7,16 @@ import (
 )
 
 const (
-	DefaultModel           = "gemini-3-flash-preview"
+	DefaultProvider        = "gemini"
+	DefaultGeminiModel     = "gemini-3-flash-preview"
+	DefaultCodexModel      = "gpt-5.4"
+	DefaultModel           = DefaultGeminiModel
 	DefaultMaxContextChars = 2_000_000
 	DefaultConfigFile      = ".ai-review.yaml"
 )
 
 type Config struct {
+	Provider        string   `yaml:"provider"`
 	Model           string   `yaml:"model"`
 	MaxContextChars int      `yaml:"max_context_chars"`
 	AgentsDir       string   `yaml:"agents_dir"`
@@ -40,6 +44,7 @@ func Load(path string) (Config, error) {
 
 func defaults() Config {
 	return Config{
+		Provider:        DefaultProvider,
 		Model:           DefaultModel,
 		MaxContextChars: DefaultMaxContextChars,
 		AgentsDir:       ".claude/agents",
