@@ -44,7 +44,7 @@ func RunGeneric(ctx gocontext.Context, reviewCtx rcontext.ReviewContext, provide
 		return Result{Label: "Generic Review", Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
 	}
 
-	body, err := provider.Call(ctx, model, prompt)
+	body, err := provider.Invoke(ctx, model, prompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("generic review: %w", err)
 	}
@@ -67,7 +67,7 @@ func RunFocused(ctx gocontext.Context, reviewCtx rcontext.ReviewContext, focus s
 		return Result{Label: label, Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
 	}
 
-	body, err := provider.Call(ctx, model, prompt)
+	body, err := provider.Invoke(ctx, model, prompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("%s review: %w", focus, err)
 	}
@@ -101,7 +101,7 @@ func RunAgent(ctx gocontext.Context, agentCtx rcontext.AgentContext, provider Pr
 		return Result{Label: label, Body: prompt, Verdict: "DRY-RUN", PromptTokens: tokens}, nil
 	}
 
-	body, err := provider.Call(ctx, model, prompt)
+	body, err := provider.Invoke(ctx, model, prompt)
 	if err != nil {
 		return Result{}, fmt.Errorf("agent %s review: %w", agentCtx.AgentName, err)
 	}

@@ -407,6 +407,10 @@ func defaultModelForProvider(provider string) string {
 	switch provider {
 	case review.ProviderCodex:
 		return config.DefaultCodexModel
+	case review.ProviderGemini:
+		return config.DefaultGeminiModel
 	}
+	// resolveProvider rejects unknown providers before this is called,
+	// but return Gemini default as a safe fallback.
 	return config.DefaultGeminiModel
 }
