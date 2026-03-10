@@ -11,6 +11,11 @@ import (
 // CallCodex sends a prompt to the Codex CLI and returns the response text.
 // It invokes the codex binary in non-interactive mode via os/exec.
 // Authentication is handled by the Codex CLI's cached OAuth credentials.
+//
+// Security: the sandbox is set to read-only (-s read-only) so the Codex agent
+// cannot modify files or execute arbitrary commands. The prompt contains PR
+// content which is untrusted input; read-only sandbox prevents prompt injection
+// from escalating to code execution.
 func CallCodex(ctx context.Context, model, prompt string) (string, error) {
 	cmd := exec.CommandContext(ctx, "codex", "exec",
 		"-m", model,

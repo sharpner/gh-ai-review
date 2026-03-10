@@ -119,18 +119,7 @@ func run(ctx gocontext.Context, opts Options) error {
 	}
 
 	// 3. Resolve model: flag > config > provider default
-	model := cfg.Model
-	if opts.Model != "" {
-		model = opts.Model
-	} else if providerName != config.DefaultProvider {
-		// Config model is the Gemini default — use provider-specific default instead
-		if cfg.Model == config.DefaultGeminiModel {
-			switch providerName {
-			case review.ProviderCodex:
-				model = config.DefaultCodexModel
-			}
-		}
-	}
+	model := resolveModel(opts.Model, cfg.Model, providerName)
 
 	// 4. Fetch repo slug for PR URLs
 	repoSlug, _ := gh.RepoSlug()
@@ -386,8 +375,31 @@ func resolveProvider(name string) (review.Provider, error) {
 		}
 		return review.Provider{
 			Call:  review.CallCodex,
-			Label: "Codex (GPT-5.4)",
+			Label: "Codex",
 		}, nil
 	}
 	return review.Provider{}, fmt.Errorf("unknown provider: %q (supported: gemini, codex)", name)
+}
+
+// resolveModel determines the model to use. Priority: flag > config > provider default.
+// Each provider has its own default model. If the config still has the default for a
+// different provider, we switch to the correct default for the active provider.
+func resolveModel(flagModel, cfgModel, providerName string) string {
+	if flagModel != "" {
+		return flagModel
+	}
+	// If config model is any known default for a *different* provider, use this provider's default
+	providerDefault := defaultModelForProvider(providerName)
+	if cfgModel == defaultModelForProvider(config.DefaultProvider) && providerName != config.DefaultProvider {
+		return providerDefault
+	}
+	return cfgModel
+}
+
+func defaultModelForProvider(provider string) string {
+	switch provider {
+	case review.ProviderCodex:
+		return config.DefaultCodexModel
+	}
+	return config.DefaultGeminiModel
 }
