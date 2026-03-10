@@ -1,10 +1,17 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+var validProviders = map[string]bool{
+	"gemini": true,
+	"codex":  true,
+}
 
 const (
 	DefaultProvider        = "gemini"
@@ -37,6 +44,11 @@ func Load(path string) (Config, error) {
 
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, err
+	}
+
+	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if !validProviders[cfg.Provider] {
+		return cfg, fmt.Errorf("invalid provider %q in config (supported: gemini, codex)", cfg.Provider)
 	}
 
 	return cfg, nil

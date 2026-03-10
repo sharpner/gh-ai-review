@@ -21,7 +21,6 @@ func CallCodex(ctx context.Context, model, prompt string) (string, error) {
 		"-m", model,
 		"-s", "read-only",
 		"--skip-git-repo-check",
-		"-o", "/dev/stdout",
 		"-",
 	)
 

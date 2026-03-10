@@ -66,6 +66,54 @@ agents_dir: custom/agents
 	}
 }
 
+func TestLoad_ProviderCodex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: codex\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != "codex" {
+		t.Errorf("provider = %q, want codex", cfg.Provider)
+	}
+}
+
+func TestLoad_ProviderCaseNormalization(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: Codex\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Provider != "codex" {
+		t.Errorf("provider = %q, want codex (normalized)", cfg.Provider)
+	}
+}
+
+func TestLoad_InvalidProvider(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ai-review.yaml")
+
+	if err := os.WriteFile(path, []byte("provider: openai\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid provider")
+	}
+}
+
 func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".ai-review.yaml")

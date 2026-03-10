@@ -2,6 +2,9 @@ package main
 
 import (
 	"testing"
+
+	"github.com/sharpner/gh-ai-review/config"
+	"github.com/sharpner/gh-ai-review/review"
 )
 
 func TestReorderArgs_FlagsAfterPositional(t *testing.T) {
@@ -86,6 +89,73 @@ func TestReorderArgs_ProviderFlag(t *testing.T) {
 		if got[i] != expected[i] {
 			t.Errorf("got[%d] = %q, want %q", i, got[i], expected[i])
 		}
+	}
+}
+
+func TestResolveProvider_Gemini(t *testing.T) {
+	p, err := resolveProvider("gemini")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.Label != "Gemini" {
+		t.Errorf("label = %q, want Gemini", p.Label)
+	}
+	if p.Call == nil {
+		t.Fatal("Call is nil")
+	}
+}
+
+func TestResolveProvider_Codex(t *testing.T) {
+	p, err := resolveProvider("codex")
+	if review.CodexAvailable() {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if p.Label != "Codex" {
+			t.Errorf("label = %q, want Codex", p.Label)
+		}
+		if p.Call == nil {
+			t.Fatal("Call is nil")
+		}
+	} else {
+		if err == nil {
+			t.Fatal("expected error when codex not on PATH")
+		}
+	}
+}
+
+func TestResolveProvider_Unknown(t *testing.T) {
+	_, err := resolveProvider("openai")
+	if err == nil {
+		t.Fatal("expected error for unknown provider")
+	}
+}
+
+func TestResolveModel_FlagOverride(t *testing.T) {
+	got := resolveModel("o4-mini", config.DefaultGeminiModel, review.ProviderCodex)
+	if got != "o4-mini" {
+		t.Errorf("got %q, want o4-mini", got)
+	}
+}
+
+func TestResolveModel_CodexDefault(t *testing.T) {
+	got := resolveModel("", config.DefaultGeminiModel, review.ProviderCodex)
+	if got != config.DefaultCodexModel {
+		t.Errorf("got %q, want %q", got, config.DefaultCodexModel)
+	}
+}
+
+func TestResolveModel_GeminiDefault(t *testing.T) {
+	got := resolveModel("", config.DefaultGeminiModel, review.ProviderGemini)
+	if got != config.DefaultGeminiModel {
+		t.Errorf("got %q, want %q", got, config.DefaultGeminiModel)
+	}
+}
+
+func TestResolveModel_CustomConfigModel(t *testing.T) {
+	got := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
+	if got != "gemini-2.5-pro" {
+		t.Errorf("got %q, want gemini-2.5-pro (user explicitly set model in config)", got)
 	}
 }
 
