@@ -108,10 +108,7 @@ func run(ctx gocontext.Context, opts Options) error {
 	}
 
 	// 2. Resolve provider: flag > config > default
-	providerName := cfg.Provider
-	if opts.Provider != "" {
-		providerName = strings.ToLower(strings.TrimSpace(opts.Provider))
-	}
+	providerName := normalizeProvider(cfg.Provider, opts.Provider)
 
 	provider, err := resolveProvider(providerName)
 	if err != nil {
@@ -360,6 +357,16 @@ func needsValue(flag string) bool {
 		return true
 	}
 	return false
+}
+
+// normalizeProvider returns the active provider name, normalized to lowercase.
+// Flag takes precedence over config.
+func normalizeProvider(cfgProvider, flagProvider string) string {
+	p := cfgProvider
+	if v := strings.ToLower(strings.TrimSpace(flagProvider)); v != "" {
+		p = v
+	}
+	return p
 }
 
 func resolveProvider(name string) (review.Provider, error) {

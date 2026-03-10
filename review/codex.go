@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -25,6 +26,7 @@ func CallCodex(ctx context.Context, model, prompt string) (string, error) {
 	)
 
 	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Env = filteredEnv()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -53,4 +55,22 @@ func CallCodex(ctx context.Context, model, prompt string) (string, error) {
 func CodexAvailable() bool {
 	_, err := exec.LookPath("codex")
 	return err == nil
+}
+
+// filteredEnv returns a minimal set of env vars for the codex subprocess.
+// This prevents leaking sensitive env vars (API keys, tokens) to the external binary.
+func filteredEnv() []string {
+	allow := map[string]bool{
+		"HOME": true, "USER": true, "PATH": true, "SHELL": true,
+		"LANG": true, "TERM": true, "TMPDIR": true, "XDG_CONFIG_HOME": true,
+	}
+	var env []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		if !allow[key] {
+			continue
+		}
+		env = append(env, e)
+	}
+	return env
 }
