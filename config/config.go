@@ -47,6 +47,9 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
+	if cfg.Provider == "" {
+		cfg.Provider = DefaultProvider
+	}
 	if !validProviders[cfg.Provider] {
 		return cfg, fmt.Errorf("invalid provider %q in config (supported: gemini, codex)", cfg.Provider)
 	}
