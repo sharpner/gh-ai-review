@@ -72,17 +72,22 @@ func CodexPath() (string, error) {
 	return exec.LookPath("codex")
 }
 
-// filteredEnv returns a minimal set of env vars for the codex subprocess.
-// This prevents leaking sensitive env vars (API keys, tokens) to the external binary.
+// filteredEnv returns the parent environment with sensitive vars removed.
+// This prevents leaking API keys and tokens to the codex subprocess while
+// preserving auth-related vars the Codex CLI needs (keychain, OAuth, etc.).
 func filteredEnv() []string {
-	allow := map[string]bool{
-		"HOME": true, "USER": true, "PATH": true, "SHELL": true,
-		"LANG": true, "TERM": true, "TMPDIR": true, "XDG_CONFIG_HOME": true,
+	deny := map[string]bool{
+		"GOOGLE_API_KEY":     true,
+		"GEMINI_API_KEY":     true,
+		"GH_TOKEN":           true,
+		"GITHUB_TOKEN":       true,
+		"AWS_SECRET_ACCESS_KEY": true,
+		"AWS_SESSION_TOKEN":  true,
 	}
 	var env []string
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
-		if !allow[key] {
+		if deny[key] {
 			continue
 		}
 		env = append(env, e)

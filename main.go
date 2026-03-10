@@ -398,20 +398,30 @@ func resolveProvider(name string) (review.Provider, error) {
 // Returns an error if a config model is clearly incompatible with the provider.
 func resolveModel(flagModel, cfgModel, providerName string) (string, error) {
 	if flagModel != "" {
+		if looksIncompatible(flagModel, providerName) {
+			fmt.Fprintf(os.Stderr, "warning: model %q may not be compatible with provider %q\n", flagModel, providerName)
+		}
 		return flagModel, nil
 	}
 	// If config model is the default for a different provider, use this provider's default
 	if cfgModel == defaultModelForProvider(config.DefaultProvider) && providerName != config.DefaultProvider {
 		return defaultModelForProvider(providerName), nil
 	}
-	// Reject known-incompatible provider/model combinations
-	if providerName == review.ProviderCodex && strings.HasPrefix(cfgModel, "gemini") {
-		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to specify a Codex-compatible model (default: %s)", cfgModel, providerName, config.DefaultCodexModel)
-	}
-	if providerName == review.ProviderGemini && (strings.HasPrefix(cfgModel, "gpt") || strings.HasPrefix(cfgModel, "o4") || strings.HasPrefix(cfgModel, "o3")) {
-		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to specify a Gemini-compatible model (default: %s)", cfgModel, providerName, config.DefaultGeminiModel)
+	// Reject known-incompatible provider/model combinations from config
+	if looksIncompatible(cfgModel, providerName) {
+		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to override (default for %s: %s)", cfgModel, providerName, providerName, defaultModelForProvider(providerName))
 	}
 	return cfgModel, nil
+}
+
+func looksIncompatible(model, provider string) bool {
+	if provider == review.ProviderCodex && strings.HasPrefix(model, "gemini") {
+		return true
+	}
+	if provider == review.ProviderGemini && (strings.HasPrefix(model, "gpt") || strings.HasPrefix(model, "o4") || strings.HasPrefix(model, "o3")) {
+		return true
+	}
+	return false
 }
 
 func defaultModelForProvider(provider string) string {
