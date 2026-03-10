@@ -72,17 +72,15 @@ func CodexPath() (string, error) {
 	return exec.LookPath("codex")
 }
 
-// filteredEnv returns the parent environment with sensitive vars removed.
-// This prevents leaking API keys and tokens to the codex subprocess while
-// preserving auth-related vars the Codex CLI needs (keychain, OAuth, etc.).
+// filteredEnv returns the parent environment with other providers' API keys removed.
+// This prevents leaking Gemini/cloud API keys to the codex subprocess while
+// preserving all auth-related vars the Codex CLI needs (OAuth, keychain, GitHub CLI).
 func filteredEnv() []string {
 	deny := map[string]bool{
-		"GOOGLE_API_KEY":     true,
-		"GEMINI_API_KEY":     true,
-		"GH_TOKEN":           true,
-		"GITHUB_TOKEN":       true,
+		"GOOGLE_API_KEY":        true,
+		"GEMINI_API_KEY":        true,
 		"AWS_SECRET_ACCESS_KEY": true,
-		"AWS_SESSION_TOKEN":  true,
+		"AWS_SESSION_TOKEN":     true,
 	}
 	var env []string
 	for _, e := range os.Environ() {
