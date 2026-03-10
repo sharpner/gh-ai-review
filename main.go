@@ -407,9 +407,11 @@ func resolveModel(flagModel, cfgModel, providerName string) (string, error) {
 	if cfgModel == defaultModelForProvider(config.DefaultProvider) && providerName != config.DefaultProvider {
 		return defaultModelForProvider(providerName), nil
 	}
-	// Reject known-incompatible provider/model combinations from config
+	// Auto-switch to provider default if config model is incompatible
 	if looksIncompatible(cfgModel, providerName) {
-		return "", fmt.Errorf("model %q is not compatible with provider %q — use --model to override (default for %s: %s)", cfgModel, providerName, providerName, defaultModelForProvider(providerName))
+		d := defaultModelForProvider(providerName)
+		fmt.Fprintf(os.Stderr, "warning: config model %q is not compatible with provider %q, using default %q\n", cfgModel, providerName, d)
+		return d, nil
 	}
 	return cfgModel, nil
 }

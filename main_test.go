@@ -162,16 +162,22 @@ func TestResolveModel_GeminiDefault(t *testing.T) {
 }
 
 func TestResolveModel_IncompatibleGeminiModelWithCodex(t *testing.T) {
-	_, err := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
-	if err == nil {
-		t.Fatal("expected error for gemini model with codex provider")
+	got, err := resolveModel("", "gemini-2.5-pro", review.ProviderCodex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultCodexModel {
+		t.Errorf("got %q, want %q (should auto-switch to codex default)", got, config.DefaultCodexModel)
 	}
 }
 
 func TestResolveModel_IncompatibleGPTModelWithGemini(t *testing.T) {
-	_, err := resolveModel("", "gpt-5.4", review.ProviderGemini)
-	if err == nil {
-		t.Fatal("expected error for gpt model with gemini provider")
+	got, err := resolveModel("", "gpt-5.4", review.ProviderGemini)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != config.DefaultGeminiModel {
+		t.Errorf("got %q, want %q (should auto-switch to gemini default)", got, config.DefaultGeminiModel)
 	}
 }
 
