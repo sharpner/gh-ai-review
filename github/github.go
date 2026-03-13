@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cli/go-gh/v2"
@@ -18,10 +19,20 @@ type PRInfo struct {
 	Deletions int
 }
 
+// Comment represents a PR discussion comment (issue comment or review comment).
+type Comment struct {
+	Author    string
+	Body      string
+	CreatedAt string
+	Path      string // only for review comments (inline)
+	Line      int    // only for review comments (inline)
+}
+
 type PRData struct {
 	Info         PRInfo
 	Diff         string
 	ChangedFiles []string
+	Comments     []Comment
 }
 
 // FetchPR retrieves PR metadata, diff, and changed file list.
@@ -71,6 +82,11 @@ func FetchPR(prNumber int) (PRData, error) {
 		}
 	}
 
+	comments, commentErr := FetchComments(prNumber)
+	if commentErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch PR comments: %v\n", commentErr)
+	}
+
 	return PRData{
 		Info: PRInfo{
 			Number:    prNumber,
@@ -82,7 +98,74 @@ func FetchPR(prNumber int) (PRData, error) {
 		},
 		Diff:         diff,
 		ChangedFiles: files,
+		Comments:     comments,
 	}, nil
+}
+
+// FetchComments retrieves PR discussion and review comments.
+// Returns comments sorted chronologically by creation time.
+func FetchComments(prNumber int) ([]Comment, error) {
+	prStr := fmt.Sprintf("%d", prNumber)
+	var comments []Comment
+
+	// 1. Issue comments (PR discussion tab)
+	stdout, _, err := gh.Exec("pr", "view", prStr, "--json", "comments")
+	if err == nil {
+		var raw struct {
+			Comments []struct {
+				Author struct {
+					Login string `json:"login"`
+				} `json:"author"`
+				Body      string `json:"body"`
+				CreatedAt string `json:"createdAt"`
+			} `json:"comments"`
+		}
+		if jsonErr := json.Unmarshal(stdout.Bytes(), &raw); jsonErr == nil {
+			for _, c := range raw.Comments {
+				comments = append(comments, Comment{
+					Author:    c.Author.Login,
+					Body:      c.Body,
+					CreatedAt: c.CreatedAt,
+				})
+			}
+		}
+	}
+
+	// 2. Review comments (inline code comments)
+	slug, slugErr := RepoSlug()
+	if slugErr == nil && slug != "" {
+		apiPath := fmt.Sprintf("repos/%s/pulls/%d/comments", slug, prNumber)
+		apiOut, _, apiErr := gh.Exec("api", apiPath, "--paginate")
+		if apiErr == nil {
+			var reviewComments []struct {
+				User struct {
+					Login string `json:"login"`
+				} `json:"user"`
+				Body      string `json:"body"`
+				CreatedAt string `json:"created_at"`
+				Path      string `json:"path"`
+				Line      int    `json:"line"`
+			}
+			if jsonErr := json.Unmarshal(apiOut.Bytes(), &reviewComments); jsonErr == nil {
+				for _, c := range reviewComments {
+					comments = append(comments, Comment{
+						Author:    c.User.Login,
+						Body:      c.Body,
+						CreatedAt: c.CreatedAt,
+						Path:      c.Path,
+						Line:      c.Line,
+					})
+				}
+			}
+		}
+	}
+
+	// Sort chronologically
+	sort.Slice(comments, func(i, j int) bool {
+		return comments[i].CreatedAt < comments[j].CreatedAt
+	})
+
+	return comments, nil
 }
 
 // PostComment posts a review comment on the given PR.
