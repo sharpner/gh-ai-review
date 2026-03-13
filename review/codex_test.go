@@ -273,3 +273,37 @@ func TestWriteFindings_FiltersByPriority(t *testing.T) {
 		t.Error("should not contain P2 finding")
 	}
 }
+
+func TestExtractCodexError_ErrorLine(t *testing.T) {
+	stderr := "session id: abc\nuser\nprompt...\nERROR: You've hit your usage limit. Try again later.: exit status 1\n"
+	got := extractCodexError(stderr)
+	if !strings.HasPrefix(got, "ERROR:") {
+		t.Errorf("expected ERROR: prefix, got %q", got)
+	}
+	if !strings.Contains(got, "usage limit") {
+		t.Errorf("expected usage limit message, got %q", got)
+	}
+}
+
+func TestExtractCodexError_NoErrorLine(t *testing.T) {
+	stderr := "some log\nanother log\nfinal message\n"
+	got := extractCodexError(stderr)
+	if got != "final message" {
+		t.Errorf("expected last line, got %q", got)
+	}
+}
+
+func TestExtractCodexError_Empty(t *testing.T) {
+	got := extractCodexError("")
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestExtractCodexError_LongLine(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	got := extractCodexError(long)
+	if len(got) > 200 {
+		t.Errorf("should truncate to 200 chars, got %d", len(got))
+	}
+}

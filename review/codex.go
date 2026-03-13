@@ -186,7 +186,7 @@ func callCodex(ctx context.Context, codexBin, model, prompt string) (string, err
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("codex: %w", ctx.Err())
 		}
-		errMsg := strings.TrimSpace(stderr.String())
+		errMsg := extractCodexError(stderr.String())
 		if errMsg != "" {
 			return "", fmt.Errorf("codex: %s: %w", errMsg, err)
 		}
@@ -217,6 +217,32 @@ func CodexAvailable() bool {
 // This pins the binary at startup to prevent PATH manipulation later.
 func CodexPath() (string, error) {
 	return exec.LookPath("codex")
+}
+
+// extractCodexError extracts the meaningful error from codex stderr.
+// Codex dumps its full session log to stderr, but the actual error is typically
+// on the last non-empty line (prefixed with "ERROR:").
+func extractCodexError(stderr string) string {
+	lines := strings.Split(strings.TrimSpace(stderr), "\n")
+	// Walk backwards to find the last ERROR: line
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(line, "ERROR:") {
+			return line
+		}
+	}
+	// Fallback: last non-empty line (capped to avoid dumping the whole log)
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if len(line) > 200 {
+			return line[:200]
+		}
+		return line
+	}
+	return ""
 }
 
 // filteredEnv returns the parent environment with other providers' API keys removed.
