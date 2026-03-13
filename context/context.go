@@ -23,7 +23,8 @@ type ReviewContext struct {
 	TokenEstimate   int
 	CRUDInDiff      bool
 	Complex         bool
-	AvailableAgents []string // agent names discovered from agents_dir
+	AvailableAgents []string   // agent names discovered from agents_dir
+	Comments        []gh.Comment // PR discussion comments
 }
 
 // AgentContext extends ReviewContext with agent-specific data.
@@ -87,6 +88,20 @@ func Build(pr gh.PRData, cfg config.Config) (ReviewContext, error) {
 	// 3. Track diff in budget (it's part of the prompt)
 	budget.Spend(len(pr.Diff))
 
+	// 3b. Cap comments to budget (50KB hard limit)
+	const maxCommentBytes = 50 * 1024
+	var cappedComments []gh.Comment
+	commentBytes := 0
+	for _, c := range pr.Comments {
+		size := len(c.Author) + len(c.Body) + len(c.Path) + len(c.CreatedAt) + 20 // overhead
+		if commentBytes+size > maxCommentBytes {
+			break
+		}
+		commentBytes += size
+		cappedComments = append(cappedComments, c)
+	}
+	budget.Spend(commentBytes)
+
 	// 4. Categorize
 	cats := Categorize(pr.ChangedFiles)
 	totalChanges := pr.Info.Additions + pr.Info.Deletions
@@ -101,6 +116,7 @@ func Build(pr gh.PRData, cfg config.Config) (ReviewContext, error) {
 		TokenEstimate: budget.TokenEstimate(),
 		CRUDInDiff:    DetectCRUDInDiff(pr.Diff),
 		Complex:       IsComplex(len(pr.ChangedFiles), totalChanges),
+		Comments:      cappedComments,
 	}, nil
 }
 

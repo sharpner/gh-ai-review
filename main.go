@@ -22,7 +22,7 @@ import (
 	"github.com/sharpner/gh-ai-review/review"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 type Options struct {
 	PRNumber int
@@ -48,6 +48,7 @@ func main() {
 	fs.StringVar(&opts.Model, "model", "", "LLM model to use (overrides config)")
 	fs.StringVar(&opts.Provider, "provider", "", "LLM provider: gemini or codex (overrides config)")
 	showVersion := fs.Bool("version", false, "Print version")
+	showStatus := fs.Bool("status", false, "Check provider authentication and connectivity")
 
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: gh ai-review <pr-number> [flags]\n\n")
@@ -73,6 +74,14 @@ func main() {
 
 	if *showVersion {
 		fmt.Println("gh-ai-review", version)
+		return
+	}
+
+	if *showStatus {
+		if err := runStatus(ctx, opts); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -436,4 +445,43 @@ func defaultModelForProvider(provider string) string {
 	// resolveProvider rejects unknown providers before this is called,
 	// but return Gemini default as a safe fallback.
 	return config.DefaultGeminiModel
+}
+
+func runStatus(ctx gocontext.Context, opts Options) error {
+	root, err := git.Root()
+	if err != nil {
+		return fmt.Errorf("git root: %w", err)
+	}
+
+	cfg, err := config.Load(filepath.Join(root, config.DefaultConfigFile))
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	providerName := normalizeProvider(cfg.Provider, opts.Provider)
+
+	model, err := resolveModel(opts.Model, cfg.Model, providerName)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "Checking %s (model: %s)...\n", providerName, model)
+
+	result := review.CheckStatus(ctx, providerName, model)
+
+	fmt.Fprintf(os.Stderr, "\nProvider: %s\nModel:    %s\n\n", result.Provider, result.Model)
+	for _, check := range result.Checks {
+		status := "PASS"
+		if !check.OK {
+			status = "FAIL"
+		}
+		fmt.Fprintf(os.Stderr, "  [%s] %s: %s\n", status, check.Name, check.Detail)
+	}
+
+	if !result.OK() {
+		return fmt.Errorf("status check failed")
+	}
+
+	fmt.Fprintln(os.Stderr, "\nAll checks passed.")
+	return nil
 }

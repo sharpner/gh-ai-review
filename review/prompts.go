@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sharpner/gh-ai-review/context"
+	gh "github.com/sharpner/gh-ai-review/github"
 )
 
 const genericInstructionsHeader = `
@@ -20,6 +21,7 @@ You are a senior code reviewer. Review the diff IN CONTEXT of the full file cont
 4. Architecture concerns (does it fit existing patterns?)
 5. Performance issues
 6. Consistency with project standards (CLAUDE.md, code-standards.md)
+7. Existing discussion (acknowledge resolved points, don't repeat them)
 `
 
 const genericInstructionsFooter = `
@@ -134,6 +136,27 @@ Use ALL of it. Don't just look at the diff — understand the FULL picture.
 Begin your review now.
 `
 
+// writeComments renders PR discussion comments into the prompt.
+func writeComments(b *strings.Builder, comments []gh.Comment) {
+	if len(comments) == 0 {
+		return
+	}
+
+	b.WriteString("\n# Existing PR Discussion\n\n")
+	for _, c := range comments {
+		if c.Path != "" {
+			fmt.Fprintf(b, "**%s** on `%s:%d`:\n", c.Author, c.Path, c.Line)
+		} else {
+			fmt.Fprintf(b, "**%s**:\n", c.Author)
+		}
+		// Blockquote the body
+		for _, line := range strings.Split(c.Body, "\n") {
+			fmt.Fprintf(b, "> %s\n", line)
+		}
+		b.WriteString("\n")
+	}
+}
+
 // buildGenericInstructions creates the generic review instructions with available agents.
 func buildGenericInstructions(agents []string) string {
 	var b strings.Builder
@@ -210,6 +233,8 @@ func BuildAgentPrompt(ctx context.AgentContext) (string, error) {
 		pr.Title, len(ctx.PR.ChangedFiles), pr.Additions, pr.Deletions)
 	fmt.Fprintf(&b, "\n**Description:**\n%s\n", pr.Body)
 
+	writeComments(&b, ctx.Comments)
+
 	// 4. Full file contents
 	b.WriteString("\n# Full File Contents (Changed Files)\n")
 	for _, file := range ctx.PR.ChangedFiles {
@@ -264,6 +289,8 @@ func writeContextBlock(b *strings.Builder, ctx context.ReviewContext) {
 		pr.Title, pr.BaseRef, len(ctx.PR.ChangedFiles), pr.Additions, pr.Deletions)
 
 	fmt.Fprintf(b, "\n**PR Description:**\n%s\n", pr.Body)
+
+	writeComments(b, ctx.Comments)
 
 	// File categories
 	b.WriteString("\n")
